@@ -100,9 +100,7 @@ type syncer interface {
 func Flush(ctx context.Context) error {
 	var s = getState(ctx)
 	if f, ok := s.console.(syncer); ok {
-		if err := f.Sync(); err != nil {
-			return err
-		}
+		_ = f.Sync()
 	}
 	for _, w := range s.writers {
 		if f, ok := w.(syncer); ok {
@@ -115,7 +113,7 @@ func Flush(ctx context.Context) error {
 }
 
 func SetFormat(ctx context.Context, format OutputFormat) context.Context {
-	var s = getState(ctx)
+	var s = getState(ctx).clone()
 	s.config.Format = format
 	return context.WithValue(ctx, stateKey, s)
 }

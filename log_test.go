@@ -252,6 +252,83 @@ func TestErr_NilError_NoOutput(t *testing.T) {
 	}
 }
 
+func TestDebugf_FormatsAtDebugLevel(t *testing.T) {
+	var output = captureOutput(Config{Level: LevelDebug, Format: HumanReadable}, func(ctx context.Context) {
+		Debugf(ctx, "value is %d", 7)
+	})
+	if !strings.Contains(output, "value is 7") {
+		t.Errorf("expected formatted debug message, got: %s", output)
+	}
+}
+
+func TestWarnf_FormatsMessage(t *testing.T) {
+	var output = captureOutput(Config{Level: LevelInfo, Format: HumanReadable}, func(ctx context.Context) {
+		Warnf(ctx, "low on %s", "memory")
+	})
+	if !strings.Contains(output, "low on memory") {
+		t.Errorf("expected formatted warn message, got: %s", output)
+	}
+	if !strings.Contains(output, "WARNING") {
+		t.Errorf("expected WARNING level, got: %s", output)
+	}
+}
+
+func TestErrorf_FormatsMessage(t *testing.T) {
+	var output = captureOutput(Config{Level: LevelInfo, Format: HumanReadable}, func(ctx context.Context) {
+		Errorf(ctx, "code %d failed", 500)
+	})
+	if !strings.Contains(output, "code 500 failed") {
+		t.Errorf("expected formatted error message, got: %s", output)
+	}
+	if !strings.Contains(output, "ERROR") {
+		t.Errorf("expected ERROR level, got: %s", output)
+	}
+}
+
+func TestErrf_NilError_NoOutput(t *testing.T) {
+	var output = captureOutput(Config{Level: LevelInfo, Format: JSON}, func(ctx context.Context) {
+		Errf(ctx, nil, "ignored %s", "msg")
+	})
+	if output != "" {
+		t.Errorf("expected no output for nil error, got: %s", output)
+	}
+}
+
+func TestEmit_WritesToConsole(t *testing.T) {
+	var buf bytes.Buffer
+	var s = &state{config: Config{Level: LevelInfo, Format: HumanReadable}, console: &buf}
+	var ctx = context.WithValue(context.Background(), stateKey, s)
+
+	Info(ctx, "to console")
+	if !strings.Contains(buf.String(), "to console") {
+		t.Errorf("expected message written to console writer, got: %s", buf.String())
+	}
+}
+
+func TestFatal_ExitsWithCodeOne(t *testing.T) {
+	var gotCode = -1
+	var original = exit
+	exit = func(code int) { gotCode = code }
+	defer func() { exit = original }()
+
+	Fatal(SuppressAllOutput(context.Background()), "fatal boom")
+	if gotCode != 1 {
+		t.Errorf("expected Fatal to exit with code 1, got %d", gotCode)
+	}
+}
+
+func TestFatalf_ExitsWithCodeOne(t *testing.T) {
+	var gotCode = -1
+	var original = exit
+	exit = func(code int) { gotCode = code }
+	defer func() { exit = original }()
+
+	Fatalf(SuppressAllOutput(context.Background()), "fatal %s", "boom")
+	if gotCode != 1 {
+		t.Errorf("expected Fatalf to exit with code 1, got %d", gotCode)
+	}
+}
+
 func TestWithScope_AppearsInOutput(t *testing.T) {
 	var output = captureOutput(Config{Level: LevelInfo, Format: JSON}, func(ctx context.Context) {
 		ctx = WithScope(ctx, "engine")

@@ -302,6 +302,110 @@ func TestCaptureStack_ReturnsFrames(t *testing.T) {
 	}
 }
 
+func TestGetColorByLevel_UnknownReturnsReset(t *testing.T) {
+	if got := getColorByLevel(Level(99)); got != colorReset {
+		t.Errorf("expected colorReset for unknown level, got %q", got)
+	}
+}
+
+func TestFormatFieldValue_AllNumericTypes(t *testing.T) {
+	var tests = []struct {
+		input    any
+		expected string
+	}{
+		{int8(-8), "-8"},
+		{int16(-16), "-16"},
+		{int32(-32), "-32"},
+		{uint(1), "1"},
+		{uint8(2), "2"},
+		{uint16(3), "3"},
+		{uint32(4), "4"},
+		{uint64(5), "5"},
+		{float32(1.5), "1.5"},
+	}
+	for _, tt := range tests {
+		if got := formatFieldValue(tt.input); got != tt.expected {
+			t.Errorf("formatFieldValue(%v): expected %s, got %s", tt.input, tt.expected, got)
+		}
+	}
+}
+
+func TestFormatFieldValue_DefaultUsesGoSyntax(t *testing.T) {
+	var got = formatFieldValue([]int{1, 2, 3})
+	if got != "[1 2 3]" {
+		t.Errorf("expected default formatting for slice, got %s", got)
+	}
+}
+
+func TestFormatHuman_IncludesStackAndError(t *testing.T) {
+	var e = entry{
+		Timestamp: time.Now(),
+		Level:     LevelError,
+		Message:   "boom",
+		Stack:     "goroutine 1 [running]:\nmain.main()",
+		Error:     fmt.Errorf("disk full"),
+	}
+	var result = formatHuman(e)
+	if !strings.Contains(result, "goroutine 1 [running]") {
+		t.Errorf("expected stack in human output, got: %s", result)
+	}
+	if !strings.Contains(result, "disk full") {
+		t.Errorf("expected error in human output, got: %s", result)
+	}
+}
+
+func TestFormatJSON_MarshalFailureReturnsErrorEntry(t *testing.T) {
+	var e = entry{
+		Timestamp: time.Now(),
+		Level:     LevelInfo,
+		Message:   "unmarshalable",
+		Fields:    map[string]any{"fn": func() {}},
+	}
+	var result = formatJSON(e)
+	if !strings.Contains(result, "failed to marshal log entry") {
+		t.Errorf("expected marshal-failure fallback, got: %s", result)
+	}
+}
+
+func TestGetCallerInfo_UnresolvableReturnsEmpty(t *testing.T) {
+	var info = getCallerInfo(10000)
+	if info.File != "" || info.Line != 0 {
+		t.Errorf("expected empty callerInfo for unresolvable skip, got %+v", info)
+	}
+}
+
+func TestGetRunningDirPrefix_StripsAppsParent(t *testing.T) {
+	var originalGetwd = getwd
+	var originalPrefix = runningDirPrefix
+	defer func() {
+		getwd = originalGetwd
+		runningDirPrefix = originalPrefix
+	}()
+
+	getwd = func() (string, error) { return "/repo/apps/myservice", nil }
+	runningDirPrefix = ""
+
+	if got := getRunningDirPrefix(); got != "/repo" {
+		t.Errorf("expected apps parent stripped to /repo, got %s", got)
+	}
+}
+
+func TestGetRunningDirPrefix_GetwdErrorFallsBackToDot(t *testing.T) {
+	var originalGetwd = getwd
+	var originalPrefix = runningDirPrefix
+	defer func() {
+		getwd = originalGetwd
+		runningDirPrefix = originalPrefix
+	}()
+
+	getwd = func() (string, error) { return "", fmt.Errorf("getwd failed") }
+	runningDirPrefix = ""
+
+	if got := getRunningDirPrefix(); got != "." {
+		t.Errorf("expected fallback to '.', got %s", got)
+	}
+}
+
 func TestFormatJSON_ErrorField(t *testing.T) {
 	var e = entry{
 		Timestamp: time.Now(),

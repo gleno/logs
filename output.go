@@ -198,9 +198,11 @@ func formatJSON(e entry) string {
 
 var runningDirPrefix string
 
+var getwd = os.Getwd
+
 func getRunningDirPrefix() string {
 	if runningDirPrefix == "" {
-		workingDir, err := os.Getwd()
+		workingDir, err := getwd()
 		if err != nil {
 			runningDirPrefix = "."
 			return runningDirPrefix
