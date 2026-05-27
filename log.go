@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 )
 
@@ -11,10 +12,14 @@ const callerSkipDepth = 3
 
 var exit = os.Exit
 
+var outputMu sync.Mutex
+
 func emit(ctx context.Context, level Level, msg string, err error) {
+	defer func() { _ = recover() }()
+
 	var s = getState(ctx)
 
-	if level < s.config.Level {
+	if level < s.config.Level && level != LevelFatal {
 		return
 	}
 
@@ -22,28 +27,51 @@ func emit(ctx context.Context, level Level, msg string, err error) {
 		return
 	}
 
+	var fields = s.fields
+	if s.redact != nil {
+		fields = applyRedaction(s.redact, s.fields)
+	}
+
 	var e = entry{
 		Timestamp: time.Now(),
 		Level:     level,
 		Message:   msg,
-		Fields:    s.fields,
+		Fields:    fields,
 		Scope:     s.scope,
 		Caller:    getCallerInfo(callerSkipDepth),
 		Error:     err,
 	}
 
-	if level >= s.config.StackTraceFrom {
+	if s.config.StackTraceFrom != nil && level >= *s.config.StackTraceFrom {
 		e.Stack = captureStack()
 	}
 
 	var formatted string
-	if s.config.Format == JSON {
+	if s.format() == JSON {
 		formatted = formatJSON(e)
 	} else {
 		formatted = formatHuman(e)
 	}
 
-	var output = []byte(formatted)
+	writeOutput(s, []byte(formatted))
+}
+
+func applyRedaction(fn RedactFunc, src map[string]any) map[string]any {
+	if len(src) == 0 {
+		return nil
+	}
+	var out = make(map[string]any, len(src))
+	for k, v := range src {
+		if nv, keep := fn(k, v); keep {
+			out[k] = nv
+		}
+	}
+	return out
+}
+
+func writeOutput(s *state, output []byte) {
+	outputMu.Lock()
+	defer outputMu.Unlock()
 
 	if s.console != nil {
 		s.console.Write(output)

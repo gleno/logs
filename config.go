@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"sync/atomic"
 )
 
 type Level int
@@ -43,8 +44,14 @@ const (
 type Config struct {
 	Level          Level
 	Format         OutputFormat
-	StackTraceFrom Level
+	StackTraceFrom *Level
 }
+
+func StackFrom(level Level) *Level {
+	return &level
+}
+
+type RedactFunc func(key string, value any) (newValue any, keep bool)
 
 type contextKeyType struct{}
 
@@ -57,19 +64,28 @@ type state struct {
 	console     io.Writer
 	writers     []io.Writer
 	suppressAll bool
+	redact      RedactFunc
 }
 
 var defaultState = &state{
 	config: Config{
 		Level:          LevelInfo,
-		Format:         HumanReadable,
-		StackTraceFrom: LevelError,
+		StackTraceFrom: StackFrom(LevelError),
 	},
 	console: os.Stderr,
 }
 
+var defaultFormat atomic.Int32
+
 func SetDefaultFormat(format OutputFormat) {
-	defaultState.config.Format = format
+	defaultFormat.Store(int32(format))
+}
+
+func (s *state) format() OutputFormat {
+	if s == defaultState {
+		return OutputFormat(defaultFormat.Load())
+	}
+	return s.config.Format
 }
 
 func getState(ctx context.Context) *state {
@@ -83,13 +99,11 @@ func getState(ctx context.Context) *state {
 }
 
 func Attach(ctx context.Context, config Config) context.Context {
-	if config.StackTraceFrom == 0 {
-		config.StackTraceFrom = LevelError
+	if config.StackTraceFrom == nil {
+		config.StackTraceFrom = StackFrom(LevelError)
 	}
-	var s = &state{
-		config:  config,
-		console: os.Stderr,
-	}
+	var s = getState(ctx).clone()
+	s.config = config
 	return context.WithValue(ctx, stateKey, s)
 }
 

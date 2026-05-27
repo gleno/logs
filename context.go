@@ -24,6 +24,7 @@ func (s *state) clone() *state {
 		console:     s.console,
 		writers:     append([]io.Writer(nil), s.writers...),
 		suppressAll: s.suppressAll,
+		redact:      s.redact,
 	}
 }
 
@@ -48,6 +49,10 @@ func WithFields(ctx context.Context, fields map[string]any) context.Context {
 }
 
 func WithScope(ctx context.Context, scope string) context.Context {
+	if scope == "" {
+		return ctx
+	}
+
 	var s = getState(ctx).clone()
 
 	if s.scope == "" {
@@ -55,11 +60,6 @@ func WithScope(ctx context.Context, scope string) context.Context {
 	} else {
 		s.scope = s.scope + "." + scope
 	}
-
-	if s.fields == nil {
-		s.fields = make(map[string]any, 1)
-	}
-	s.fields["scope"] = s.scope
 
 	return context.WithValue(ctx, stateKey, s)
 }
@@ -79,5 +79,11 @@ func AttachWriter(ctx context.Context, w io.Writer) context.Context {
 func SuppressAllOutput(ctx context.Context) context.Context {
 	var s = getState(ctx).clone()
 	s.suppressAll = true
+	return context.WithValue(ctx, stateKey, s)
+}
+
+func WithRedaction(ctx context.Context, fn RedactFunc) context.Context {
+	var s = getState(ctx).clone()
+	s.redact = fn
 	return context.WithValue(ctx, stateKey, s)
 }

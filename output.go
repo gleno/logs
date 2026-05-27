@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"runtime"
 	"sort"
@@ -38,16 +39,6 @@ const (
 	colorBlue   = "\x1b[34m"
 	colorGray   = "\x1b[90m"
 )
-
-var hiddenFields = map[string]bool{
-	"app": true, "env": true, "account_key": true,
-	"http_method": true, "http_uri": true, "namespace": true,
-	"origin_app_key": true, "origin_http_method": true, "origin_http_uri": true, "origin_remote_ip": true,
-	"http_host": true, "http_proto": true, "http_remote_addr": true, "http_scheme": true,
-	"http_url": true, "http_user_agent": true, "remote_ip": true,
-	"user_id": true, "http_route": true, "http_resp_bytes_length": true, "http_resp_status": true,
-	"http_path": true, "time_ms": true,
-}
 
 func getColorByLevel(level Level) string {
 	switch level {
@@ -105,31 +96,29 @@ func formatHuman(e entry) string {
 	var levelColor = getColorByLevel(e.Level)
 	var timestamp = e.Timestamp.Format("15:04:05")
 
-	fmt.Fprintf(&buf, "%s%-7s%s[%s] %s",
+	fmt.Fprintf(&buf, "%s%-7s%s[%s] ",
 		levelColor,
 		e.Level.String(),
 		colorReset,
-		timestamp,
-		e.Message)
+		timestamp)
+
+	if e.Scope != "" {
+		fmt.Fprintf(&buf, "%s[%s]%s ", colorDim, e.Scope, colorReset)
+	}
+
+	buf.WriteString(e.Message)
 
 	if e.Caller.File != "" {
 		fmt.Fprintf(&buf, " %s(%s:%d)%s", colorDim, e.Caller.File, e.Caller.Line, colorReset)
 	}
 
-	var visibleFields = make(map[string]any, len(e.Fields))
-	for k, v := range e.Fields {
-		if !hiddenFields[k] {
-			visibleFields[k] = v
-		}
-	}
-
-	if len(visibleFields) > 0 {
+	if len(e.Fields) > 0 {
 		buf.WriteString("\n")
 		buf.WriteString(colorDim)
 		buf.WriteString("    ")
 
-		var keys = make([]string, 0, len(visibleFields))
-		for k := range visibleFields {
+		var keys = make([]string, 0, len(e.Fields))
+		for k := range e.Fields {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
@@ -138,7 +127,7 @@ func formatHuman(e entry) string {
 			if i > 0 {
 				buf.WriteString(" ")
 			}
-			fmt.Fprintf(&buf, "%s=%s", k, formatFieldValue(visibleFields[k]))
+			fmt.Fprintf(&buf, "%s=%s", k, formatFieldValue(e.Fields[k]))
 		}
 		buf.WriteString(colorReset)
 	}
@@ -156,16 +145,29 @@ func formatHuman(e entry) string {
 }
 
 func formatJSON(e entry) string {
+	if b, ok := tryMarshal(jsonEntryMap(e, e.Fields)); ok {
+		return string(append(b, '\n'))
+	}
+
+	var b, _ = json.Marshal(jsonEntryMap(e, sanitizeFields(e.Fields)))
+	return string(append(b, '\n'))
+}
+
+func jsonEntryMap(e entry, fields map[string]any) map[string]any {
 	var m = map[string]any{
 		"timestamp": e.Timestamp.Format(time.RFC3339Nano),
 		"severity":  e.Level.String(),
 		"message":   e.Message,
 	}
 
+	if e.Scope != "" {
+		m["scope"] = e.Scope
+	}
+
 	var data map[string]any
-	if len(e.Fields) > 0 {
-		data = make(map[string]any, len(e.Fields)+1)
-		for k, v := range e.Fields {
+	if len(fields) > 0 {
+		data = make(map[string]any, len(fields)+1)
+		for k, v := range fields {
 			data[k] = v
 		}
 	}
@@ -189,12 +191,65 @@ func formatJSON(e entry) string {
 		m["error"] = e.Error.Error()
 	}
 
-	var b, err = json.Marshal(m)
-	if err != nil {
-		return fmt.Sprintf(`{"severity":"ERROR","message":"failed to marshal log entry: %s"}`, err)
+	return m
+}
+
+func tryMarshal(m map[string]any) (b []byte, ok bool) {
+	defer func() {
+		if recover() != nil {
+			b, ok = nil, false
+		}
+	}()
+	var err error
+	b, err = json.Marshal(m)
+	return b, err == nil
+}
+
+func sanitizeFields(fields map[string]any) map[string]any {
+	var out = make(map[string]any, len(fields))
+	for k, v := range fields {
+		out[k] = sanitizeValue(v)
 	}
-	b = append(b, '\n')
-	return string(b)
+	return out
+}
+
+func sanitizeValue(v any) any {
+	switch f := v.(type) {
+	case float64:
+		if s, ok := nonFiniteString(f); ok {
+			return s
+		}
+	case float32:
+		if s, ok := nonFiniteString(float64(f)); ok {
+			return s
+		}
+	}
+	if marshalsOK(v) {
+		return v
+	}
+	return fmt.Sprintf("!ERR(%T)", v)
+}
+
+func nonFiniteString(f float64) (string, bool) {
+	switch {
+	case math.IsNaN(f):
+		return "NaN", true
+	case math.IsInf(f, 1):
+		return "+Inf", true
+	case math.IsInf(f, -1):
+		return "-Inf", true
+	}
+	return "", false
+}
+
+func marshalsOK(v any) (ok bool) {
+	defer func() {
+		if recover() != nil {
+			ok = false
+		}
+	}()
+	var _, err = json.Marshal(v)
+	return err == nil
 }
 
 var runningDirPrefix string

@@ -26,12 +26,12 @@ func TestLevel_String_Unknown(t *testing.T) {
 }
 
 func TestSetDefaultFormat_MutatesDefaultState(t *testing.T) {
-	var original = defaultState.config.Format
+	var original = defaultState.format()
 	defer SetDefaultFormat(original)
 
 	SetDefaultFormat(JSON)
-	if defaultState.config.Format != JSON {
-		t.Errorf("expected default format JSON, got %v", defaultState.config.Format)
+	if defaultState.format() != JSON {
+		t.Errorf("expected default format JSON, got %v", defaultState.format())
 	}
 }
 
@@ -54,13 +54,13 @@ func TestSetFormat_DoesNotMutateParent(t *testing.T) {
 }
 
 func TestSetFormat_DoesNotMutateDefaultState(t *testing.T) {
-	var original = defaultState.config.Format
-	defer func() { defaultState.config.Format = original }()
+	var original = defaultState.format()
+	defer SetDefaultFormat(original)
 
 	SetFormat(context.Background(), JSON)
 
-	if defaultState.config.Format != original {
-		t.Errorf("SetFormat on bare context mutated global default state to %v", defaultState.config.Format)
+	if defaultState.format() != original {
+		t.Errorf("SetFormat on bare context mutated global default format to %v", defaultState.format())
 	}
 }
 

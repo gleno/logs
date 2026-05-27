@@ -211,7 +211,7 @@ func TestStackTrace_IncludedAtErrorLevel(t *testing.T) {
 	var output = captureOutput(Config{
 		Level:          LevelInfo,
 		Format:         JSON,
-		StackTraceFrom: LevelError,
+		StackTraceFrom: StackFrom(LevelError),
 	}, func(ctx context.Context) {
 		Error(ctx, "with stack")
 	})
@@ -229,7 +229,7 @@ func TestStackTrace_NotIncludedBelowThreshold(t *testing.T) {
 	var output = captureOutput(Config{
 		Level:          LevelInfo,
 		Format:         JSON,
-		StackTraceFrom: LevelError,
+		StackTraceFrom: StackFrom(LevelError),
 	}, func(ctx context.Context) {
 		Warn(ctx, "no stack")
 	})
@@ -340,8 +340,12 @@ func TestWithScope_AppearsInOutput(t *testing.T) {
 	if err := json.Unmarshal([]byte(output), &parsed); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
-	data, _ := parsed["data"].(map[string]any)
-	if data["scope"] != "engine.ingestion" {
-		t.Errorf("expected scope engine.ingestion, got %v", data["scope"])
+	if parsed["scope"] != "engine.ingestion" {
+		t.Errorf("expected top-level scope engine.ingestion, got %v", parsed["scope"])
+	}
+	if data, ok := parsed["data"].(map[string]any); ok {
+		if _, exists := data["scope"]; exists {
+			t.Error("scope must not appear inside data")
+		}
 	}
 }

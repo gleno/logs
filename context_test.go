@@ -81,13 +81,16 @@ func TestWithScope_BuildsDotSeparatedPath(t *testing.T) {
 	}
 }
 
-func TestWithScope_AddsToFields(t *testing.T) {
+func TestWithScope_SetsScopeNotFields(t *testing.T) {
 	var ctx = Attach(context.Background(), Config{Level: LevelInfo})
 	ctx = WithScope(ctx, "engine")
 
 	var s = testState(ctx)
-	if s.fields["scope"] != "engine" {
-		t.Errorf("expected scope field, got %v", s.fields["scope"])
+	if s.scope != "engine" {
+		t.Errorf("expected scope %q, got %q", "engine", s.scope)
+	}
+	if _, exists := s.fields["scope"]; exists {
+		t.Error("scope must not leak into the user fields bag")
 	}
 }
 

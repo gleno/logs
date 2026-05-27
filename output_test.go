@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -74,22 +75,6 @@ func TestFormatHuman_ColorByLevel(t *testing.T) {
 		if !strings.Contains(result, tt.color) {
 			t.Errorf("level %s: expected color %q in output", tt.level, tt.color)
 		}
-	}
-}
-
-func TestFormatHuman_HiddenFieldsFiltered(t *testing.T) {
-	var e = entry{
-		Timestamp: time.Now(),
-		Level:     LevelInfo,
-		Message:   "msg",
-		Fields:    map[string]any{"app": "test", "env": "prod", "real_field": "keep"},
-	}
-	var result = formatHuman(e)
-	if strings.Contains(result, "app=") {
-		t.Errorf("expected hidden field 'app' to be filtered, got: %s", result)
-	}
-	if !strings.Contains(result, "real_field=") {
-		t.Errorf("expected real_field to be kept, got: %s", result)
 	}
 }
 
@@ -354,16 +339,31 @@ func TestFormatHuman_IncludesStackAndError(t *testing.T) {
 	}
 }
 
-func TestFormatJSON_MarshalFailureReturnsErrorEntry(t *testing.T) {
+func TestFormatJSON_UnserializableFieldKeepsEntry(t *testing.T) {
 	var e = entry{
 		Timestamp: time.Now(),
 		Level:     LevelInfo,
 		Message:   "unmarshalable",
-		Fields:    map[string]any{"fn": func() {}},
+		Fields:    map[string]any{"fn": func() {}, "ok": "kept"},
 	}
 	var result = formatJSON(e)
-	if !strings.Contains(result, "failed to marshal log entry") {
-		t.Errorf("expected marshal-failure fallback, got: %s", result)
+
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+		t.Fatalf("entry must stay valid JSON, got: %s", result)
+	}
+	if parsed["message"] != "unmarshalable" {
+		t.Errorf("message must survive a bad field, got %v", parsed["message"])
+	}
+	data, ok := parsed["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected data object, got %T", parsed["data"])
+	}
+	if data["ok"] != "kept" {
+		t.Errorf("good field must survive, got %v", data["ok"])
+	}
+	if fn, _ := data["fn"].(string); !strings.Contains(fn, "ERR") {
+		t.Errorf("unserializable field should become a placeholder, got %v", data["fn"])
 	}
 }
 
@@ -442,4 +442,26 @@ func TestTrimDirPrefix_PathComponentAware(t *testing.T) {
 			t.Errorf("%s: trimDirPrefix(%q, %q) = %q, want %q", tt.name, tt.file, tt.prefix, got, tt.want)
 		}
 	}
+}
+
+func TestGetRunningDirPrefix_ConcurrentLazyInitRace(t *testing.T) {
+	var originalGetwd = getwd
+	var originalPrefix = runningDirPrefix
+	defer func() {
+		getwd = originalGetwd
+		runningDirPrefix = originalPrefix
+	}()
+
+	getwd = func() (string, error) { return "/repo/apps/myservice", nil }
+	runningDirPrefix = ""
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = getRunningDirPrefix()
+		}()
+	}
+	wg.Wait()
 }
