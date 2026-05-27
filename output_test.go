@@ -423,3 +423,23 @@ func TestFormatJSON_ErrorField(t *testing.T) {
 		t.Errorf("expected error field, got %v", parsed["error"])
 	}
 }
+
+func TestTrimDirPrefix_PathComponentAware(t *testing.T) {
+	var tests = []struct {
+		name   string
+		file   string
+		prefix string
+		want   string
+	}{
+		{"under prefix", "/repo/pkg/foo.go", "/repo", "pkg/foo.go"},
+		{"equals prefix", "/repo", "/repo", ""},
+		{"sibling shares string prefix", "/repo-shared/util.go", "/repo", "/repo-shared/util.go"},
+		{"prefix is substring mid-component", "/repository/foo.go", "/repo", "/repository/foo.go"},
+		{"unrelated path untouched", "/usr/local/go/src/fmt/print.go", "/repo", "/usr/local/go/src/fmt/print.go"},
+	}
+	for _, tt := range tests {
+		if got := trimDirPrefix(tt.file, tt.prefix); got != tt.want {
+			t.Errorf("%s: trimDirPrefix(%q, %q) = %q, want %q", tt.name, tt.file, tt.prefix, got, tt.want)
+		}
+	}
+}

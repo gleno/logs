@@ -240,8 +240,7 @@ func getCallerInfo(skip int) callerInfo {
 		}
 	}
 
-	var displayFile = strings.TrimPrefix(file, getRunningDirPrefix())
-	displayFile = strings.TrimPrefix(displayFile, "/")
+	var displayFile = trimDirPrefix(file, getRunningDirPrefix())
 
 	return callerInfo{
 		File: displayFile,
@@ -249,6 +248,16 @@ func getCallerInfo(skip int) callerInfo {
 		Pkg:  pkg,
 		Func: funcName,
 	}
+}
+
+func trimDirPrefix(file, prefix string) string {
+	if file == prefix {
+		return ""
+	}
+	if strings.HasPrefix(file, prefix+"/") {
+		return file[len(prefix)+1:]
+	}
+	return file
 }
 
 func formatAtCode(c callerInfo) string {
