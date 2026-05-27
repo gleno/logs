@@ -9,6 +9,8 @@ import (
 
 const callerSkipDepth = 3
 
+var exit = os.Exit
+
 func emit(ctx context.Context, level Level, msg string, err error) {
 	var s = getState(ctx)
 
@@ -86,12 +88,12 @@ func Errorf(ctx context.Context, format string, args ...any) {
 
 func Fatal(ctx context.Context, msg string) {
 	emit(ctx, LevelFatal, msg, nil)
-	os.Exit(1)
+	exit(1)
 }
 
 func Fatalf(ctx context.Context, format string, args ...any) {
 	emit(ctx, LevelFatal, fmt.Sprintf(format, args...), nil)
-	os.Exit(1)
+	exit(1)
 }
 
 func Err(ctx context.Context, err error) {
