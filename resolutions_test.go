@@ -30,7 +30,7 @@ func parseJSON(t *testing.T, s string) map[string]any {
 }
 
 func TestResolve_PanickyFieldDoesNotCrashAndEntrySurvives(t *testing.T) {
-	var out = captureOutput(Config{Level: LevelInfo, Format: JSON}, func(ctx context.Context) {
+	var out = captureOutput(Config{Level: LevelInfo, Formatter: GCPLogFormatter{}}, func(ctx context.Context) {
 		ctx = WithFields(ctx, map[string]any{"bad": panicMarshaler{}, "good": "kept"})
 		Info(ctx, "still logs")
 	})
@@ -49,7 +49,7 @@ func TestResolve_PanickyFieldDoesNotCrashAndEntrySurvives(t *testing.T) {
 }
 
 func TestResolve_NaNInfStringified(t *testing.T) {
-	var out = captureOutput(Config{Level: LevelInfo, Format: JSON}, func(ctx context.Context) {
+	var out = captureOutput(Config{Level: LevelInfo, Formatter: GCPLogFormatter{}}, func(ctx context.Context) {
 		ctx = WithFields(ctx, map[string]any{
 			"nan":    math.NaN(),
 			"pinf":   math.Inf(1),
@@ -120,7 +120,7 @@ func TestResolve_AttachMergesPriorState(t *testing.T) {
 	var ctx = Attach(context.Background(), Config{Level: LevelInfo})
 	ctx = AttachWriter(ctx, &buf)
 	ctx = SuppressConsoleOutput(ctx)
-	ctx = Attach(ctx, Config{Level: LevelDebug, Format: JSON})
+	ctx = Attach(ctx, Config{Level: LevelDebug, Formatter: GCPLogFormatter{}})
 
 	Info(ctx, "after reattach")
 
@@ -133,7 +133,7 @@ func TestResolve_AttachMergesPriorState(t *testing.T) {
 }
 
 func TestResolve_DefaultFormatNoRace(t *testing.T) {
-	var original = defaultState.format()
+	var original = defaultState.formatter()
 	defer SetDefaultFormat(original)
 	var origConsole = defaultState.console
 	defaultState.console = io.Discard
@@ -144,7 +144,7 @@ func TestResolve_DefaultFormatNoRace(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for range 100 {
-			SetDefaultFormat(JSON)
+			SetDefaultFormat(GCPLogFormatter{})
 		}
 	}()
 	go func() {
@@ -157,7 +157,7 @@ func TestResolve_DefaultFormatNoRace(t *testing.T) {
 }
 
 func TestResolve_StackTraceFromNilDefaultsToError(t *testing.T) {
-	var out = captureOutput(Config{Level: LevelDebug, Format: JSON}, func(ctx context.Context) {
+	var out = captureOutput(Config{Level: LevelDebug, Formatter: GCPLogFormatter{}}, func(ctx context.Context) {
 		Error(ctx, "boom")
 	})
 	if parseJSON(t, out)["stack_trace"] == nil {
@@ -166,7 +166,7 @@ func TestResolve_StackTraceFromNilDefaultsToError(t *testing.T) {
 }
 
 func TestResolve_StackTraceFromDebugIsConfigurable(t *testing.T) {
-	var out = captureOutput(Config{Level: LevelDebug, Format: JSON, StackTraceFrom: StackFrom(LevelDebug)}, func(ctx context.Context) {
+	var out = captureOutput(Config{Level: LevelDebug, Formatter: GCPLogFormatter{}, StackTraceFrom: StackFrom(LevelDebug)}, func(ctx context.Context) {
 		Debug(ctx, "trace me")
 	})
 	if parseJSON(t, out)["stack_trace"] == nil {
@@ -175,7 +175,7 @@ func TestResolve_StackTraceFromDebugIsConfigurable(t *testing.T) {
 }
 
 func TestResolve_ScopeIsFirstClass(t *testing.T) {
-	var out = captureOutput(Config{Level: LevelInfo, Format: JSON}, func(ctx context.Context) {
+	var out = captureOutput(Config{Level: LevelInfo, Formatter: GCPLogFormatter{}}, func(ctx context.Context) {
 		ctx = WithScope(ctx, "engine")
 		ctx = WithFields(ctx, map[string]any{"scope": "user-value"})
 		Info(ctx, "msg")
@@ -192,7 +192,7 @@ func TestResolve_ScopeIsFirstClass(t *testing.T) {
 }
 
 func TestResolve_ScopeInHumanHeader(t *testing.T) {
-	var e = entry{Timestamp: time.Now(), Level: LevelInfo, Message: "started", Scope: "engine.ingestion"}
+	var e = Entry{Timestamp: time.Now(), Level: LevelInfo, Message: "started", Scope: "engine.ingestion"}
 	var r = formatHuman(e)
 	if !strings.Contains(r, "[engine.ingestion]") {
 		t.Errorf("expected scope segment in human header, got: %s", r)
@@ -205,7 +205,7 @@ func TestResolve_FatalAlwaysEmits(t *testing.T) {
 	defer func() { exit = origExit }()
 
 	var buf bytes.Buffer
-	var ctx = Attach(context.Background(), Config{Level: LevelFatal + 1, Format: HumanReadable})
+	var ctx = Attach(context.Background(), Config{Level: LevelFatal + 1, Formatter: HumanLogFormatter{}})
 	ctx = SuppressConsoleOutput(ctx)
 	ctx = AttachWriter(ctx, &buf)
 

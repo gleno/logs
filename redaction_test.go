@@ -23,7 +23,7 @@ func redactKeysTo(replacement any, keys ...string) RedactFunc {
 func TestRedaction_MaskAppliesToBothFormats(t *testing.T) {
 	var fields = map[string]any{"token": "secret", "user": "u1"}
 
-	var jsonOut = captureOutput(Config{Level: LevelInfo, Format: JSON}, func(ctx context.Context) {
+	var jsonOut = captureOutput(Config{Level: LevelInfo, Formatter: GCPLogFormatter{}}, func(ctx context.Context) {
 		ctx = WithRedaction(ctx, redactKeysTo("[REDACTED]", "token"))
 		ctx = WithFields(ctx, fields)
 		Info(ctx, "msg")
@@ -36,7 +36,7 @@ func TestRedaction_MaskAppliesToBothFormats(t *testing.T) {
 		t.Errorf("JSON: non-redacted field changed, got %v", data["user"])
 	}
 
-	var humanOut = captureOutput(Config{Level: LevelInfo, Format: HumanReadable}, func(ctx context.Context) {
+	var humanOut = captureOutput(Config{Level: LevelInfo, Formatter: HumanLogFormatter{}}, func(ctx context.Context) {
 		ctx = WithRedaction(ctx, redactKeysTo("[REDACTED]", "token"))
 		ctx = WithFields(ctx, fields)
 		Info(ctx, "msg")
@@ -56,7 +56,7 @@ func TestRedaction_KeepFalseOmitsField(t *testing.T) {
 		}
 		return value, true
 	}
-	var out = captureOutput(Config{Level: LevelInfo, Format: JSON}, func(ctx context.Context) {
+	var out = captureOutput(Config{Level: LevelInfo, Formatter: GCPLogFormatter{}}, func(ctx context.Context) {
 		ctx = WithRedaction(ctx, dropToken)
 		ctx = WithFields(ctx, map[string]any{"token": "secret", "user": "u1"})
 		Info(ctx, "msg")
@@ -72,7 +72,7 @@ func TestRedaction_KeepFalseOmitsField(t *testing.T) {
 
 func TestRedaction_PassThroughPreservesType(t *testing.T) {
 	var passAll = func(key string, value any) (any, bool) { return value, true }
-	var out = captureOutput(Config{Level: LevelInfo, Format: JSON}, func(ctx context.Context) {
+	var out = captureOutput(Config{Level: LevelInfo, Formatter: GCPLogFormatter{}}, func(ctx context.Context) {
 		ctx = WithRedaction(ctx, passAll)
 		ctx = WithFields(ctx, map[string]any{"count": 42})
 		Info(ctx, "msg")
@@ -89,7 +89,7 @@ func TestRedaction_OnlySeesUserFields(t *testing.T) {
 		seen[key] = true
 		return value, true
 	}
-	var out = captureOutput(Config{Level: LevelInfo, Format: JSON}, func(ctx context.Context) {
+	var out = captureOutput(Config{Level: LevelInfo, Formatter: GCPLogFormatter{}}, func(ctx context.Context) {
 		ctx = WithScope(ctx, "engine")
 		ctx = WithRedaction(ctx, record)
 		ctx = WithFields(ctx, map[string]any{"user": "u1"})
@@ -106,7 +106,7 @@ func TestRedaction_OnlySeesUserFields(t *testing.T) {
 	if !seen["user"] {
 		t.Error("redact func should be called for the user field")
 	}
-	for _, k := range []string{"@code", "scope", "message"} {
+	for _, k := range []string{"logging.googleapis.com/sourceLocation", "scope", "message"} {
 		if seen[k] {
 			t.Errorf("redact func should never see %q", k)
 		}
@@ -114,7 +114,7 @@ func TestRedaction_OnlySeesUserFields(t *testing.T) {
 }
 
 func TestRedaction_NilIsNoOp(t *testing.T) {
-	var out = captureOutput(Config{Level: LevelInfo, Format: JSON}, func(ctx context.Context) {
+	var out = captureOutput(Config{Level: LevelInfo, Formatter: GCPLogFormatter{}}, func(ctx context.Context) {
 		ctx = WithFields(ctx, map[string]any{"a": "b"})
 		Info(ctx, "msg")
 	})
@@ -138,7 +138,7 @@ func TestRedaction_PanicDoesNotCrash(t *testing.T) {
 }
 
 func TestRedaction_SetButNoFieldsIsSafe(t *testing.T) {
-	var out = captureOutput(Config{Level: LevelInfo, Format: JSON}, func(ctx context.Context) {
+	var out = captureOutput(Config{Level: LevelInfo, Formatter: GCPLogFormatter{}}, func(ctx context.Context) {
 		ctx = WithRedaction(ctx, func(key string, value any) (any, bool) { return value, true })
 		Info(ctx, "no fields here")
 	})
@@ -149,7 +149,7 @@ func TestRedaction_SetButNoFieldsIsSafe(t *testing.T) {
 }
 
 func TestRedaction_NoBuiltInHiddenFields(t *testing.T) {
-	var out = captureOutput(Config{Level: LevelInfo, Format: HumanReadable}, func(ctx context.Context) {
+	var out = captureOutput(Config{Level: LevelInfo, Formatter: HumanLogFormatter{}}, func(ctx context.Context) {
 		ctx = WithFields(ctx, map[string]any{"app": "myapp"})
 		Info(ctx, "msg")
 	})

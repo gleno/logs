@@ -34,16 +34,9 @@ func (l Level) String() string {
 	}
 }
 
-type OutputFormat int
-
-const (
-	HumanReadable OutputFormat = iota
-	JSON
-)
-
 type Config struct {
 	Level          Level
-	Format         OutputFormat
+	Formatter      LoggerFormatter
 	StackTraceFrom *Level
 }
 
@@ -75,17 +68,29 @@ var defaultState = &state{
 	console: os.Stderr,
 }
 
-var defaultFormat atomic.Int32
+type formatterBox struct{ formatter LoggerFormatter }
 
-func SetDefaultFormat(format OutputFormat) {
-	defaultFormat.Store(int32(format))
+var defaultFormatter atomic.Value
+
+func SetDefaultFormat(formatter LoggerFormatter) {
+	defaultFormatter.Store(formatterBox{formatter})
 }
 
-func (s *state) format() OutputFormat {
-	if s == defaultState {
-		return OutputFormat(defaultFormat.Load())
+func loadDefaultFormatter() LoggerFormatter {
+	if b, ok := defaultFormatter.Load().(formatterBox); ok && b.formatter != nil {
+		return b.formatter
 	}
-	return s.config.Format
+	return HumanLogFormatter{}
+}
+
+func (s *state) formatter() LoggerFormatter {
+	if s == defaultState {
+		return loadDefaultFormatter()
+	}
+	if s.config.Formatter != nil {
+		return s.config.Formatter
+	}
+	return HumanLogFormatter{}
 }
 
 func getState(ctx context.Context) *state {
@@ -126,8 +131,8 @@ func Flush(ctx context.Context) error {
 	return nil
 }
 
-func SetFormat(ctx context.Context, format OutputFormat) context.Context {
+func SetFormat(ctx context.Context, formatter LoggerFormatter) context.Context {
 	var s = getState(ctx).clone()
-	s.config.Format = format
+	s.config.Formatter = formatter
 	return context.WithValue(ctx, stateKey, s)
 }

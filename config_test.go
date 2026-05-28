@@ -26,41 +26,41 @@ func TestLevel_String_Unknown(t *testing.T) {
 }
 
 func TestSetDefaultFormat_MutatesDefaultState(t *testing.T) {
-	var original = defaultState.format()
+	var original = defaultState.formatter()
 	defer SetDefaultFormat(original)
 
-	SetDefaultFormat(JSON)
-	if defaultState.format() != JSON {
-		t.Errorf("expected default format JSON, got %v", defaultState.format())
+	SetDefaultFormat(GCPLogFormatter{})
+	if _, ok := defaultState.formatter().(GCPLogFormatter); !ok {
+		t.Errorf("expected default formatter GCPLogFormatter, got %T", defaultState.formatter())
 	}
 }
 
 func TestSetFormat_ReturnsContextWithNewFormat(t *testing.T) {
-	var ctx = Attach(context.Background(), Config{Level: LevelInfo, Format: HumanReadable})
-	var child = SetFormat(ctx, JSON)
+	var ctx = Attach(context.Background(), Config{Level: LevelInfo, Formatter: HumanLogFormatter{}})
+	var child = SetFormat(ctx, GCPLogFormatter{})
 
-	if testState(child).config.Format != JSON {
-		t.Errorf("expected child format JSON, got %v", testState(child).config.Format)
+	if _, ok := testState(child).config.Formatter.(GCPLogFormatter); !ok {
+		t.Errorf("expected child formatter GCPLogFormatter, got %T", testState(child).config.Formatter)
 	}
 }
 
 func TestSetFormat_DoesNotMutateParent(t *testing.T) {
-	var ctx = Attach(context.Background(), Config{Level: LevelInfo, Format: HumanReadable})
-	SetFormat(ctx, JSON)
+	var ctx = Attach(context.Background(), Config{Level: LevelInfo, Formatter: HumanLogFormatter{}})
+	SetFormat(ctx, GCPLogFormatter{})
 
-	if testState(ctx).config.Format != HumanReadable {
-		t.Errorf("SetFormat mutated parent state: parent format is now %v", testState(ctx).config.Format)
+	if _, ok := testState(ctx).config.Formatter.(HumanLogFormatter); !ok {
+		t.Errorf("SetFormat mutated parent state: parent formatter is now %T", testState(ctx).config.Formatter)
 	}
 }
 
 func TestSetFormat_DoesNotMutateDefaultState(t *testing.T) {
-	var original = defaultState.format()
+	var original = defaultState.formatter()
 	defer SetDefaultFormat(original)
 
-	SetFormat(context.Background(), JSON)
+	SetFormat(context.Background(), GCPLogFormatter{})
 
-	if defaultState.format() != original {
-		t.Errorf("SetFormat on bare context mutated global default format to %v", defaultState.format())
+	if defaultState.formatter() != original {
+		t.Errorf("SetFormat on bare context mutated global default formatter to %v", defaultState.formatter())
 	}
 }
 

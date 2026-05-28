@@ -32,7 +32,7 @@ func emit(ctx context.Context, level Level, msg string, err error) {
 		fields = applyRedaction(s.redact, s.fields)
 	}
 
-	var e = entry{
+	var e = Entry{
 		Timestamp: time.Now(),
 		Level:     level,
 		Message:   msg,
@@ -46,14 +46,7 @@ func emit(ctx context.Context, level Level, msg string, err error) {
 		e.Stack = captureStack()
 	}
 
-	var formatted string
-	if s.format() == JSON {
-		formatted = formatJSON(e)
-	} else {
-		formatted = formatHuman(e)
-	}
-
-	writeOutput(s, []byte(formatted))
+	writeOutput(s, s.formatter().Format(e))
 }
 
 func applyRedaction(fn RedactFunc, src map[string]any) map[string]any {

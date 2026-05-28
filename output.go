@@ -8,25 +8,26 @@ import (
 	"os"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
-type callerInfo struct {
+type CallerInfo struct {
 	File string
 	Line int
 	Pkg  string
 	Func string
 }
 
-type entry struct {
+type Entry struct {
 	Timestamp time.Time
 	Level     Level
 	Message   string
 	Fields    map[string]any
 	Scope     string
-	Caller    callerInfo
+	Caller    CallerInfo
 	Stack     string
 	Error     error
 }
@@ -90,7 +91,7 @@ func formatFieldValue(value any) string {
 	}
 }
 
-func formatHuman(e entry) string {
+func formatHuman(e Entry) string {
 	var buf bytes.Buffer
 
 	var levelColor = getColorByLevel(e.Level)
@@ -144,7 +145,7 @@ func formatHuman(e entry) string {
 	return buf.String()
 }
 
-func formatJSON(e entry) string {
+func formatJSON(e Entry) string {
 	if b, ok := tryMarshal(jsonEntryMap(e, e.Fields)); ok {
 		return string(append(b, '\n'))
 	}
@@ -153,7 +154,7 @@ func formatJSON(e entry) string {
 	return string(append(b, '\n'))
 }
 
-func jsonEntryMap(e entry, fields map[string]any) map[string]any {
+func jsonEntryMap(e Entry, fields map[string]any) map[string]any {
 	var m = map[string]any{
 		"timestamp": e.Timestamp.Format(time.RFC3339Nano),
 		"severity":  e.Level.String(),
@@ -164,23 +165,16 @@ func jsonEntryMap(e entry, fields map[string]any) map[string]any {
 		m["scope"] = e.Scope
 	}
 
-	var data map[string]any
 	if len(fields) > 0 {
-		data = make(map[string]any, len(fields)+1)
+		var data = make(map[string]any, len(fields))
 		for k, v := range fields {
 			data[k] = v
 		}
+		m["data"] = data
 	}
 
 	if e.Caller.File != "" {
-		if data == nil {
-			data = make(map[string]any, 1)
-		}
-		data["@code"] = formatAtCode(e.Caller)
-	}
-
-	if data != nil {
-		m["data"] = data
+		m[gcpSourceLocationKey] = sourceLocation(e.Caller)
 	}
 
 	if e.Stack != "" {
@@ -276,10 +270,10 @@ func getRunningDirPrefix() string {
 	return runningDirPrefix
 }
 
-func getCallerInfo(skip int) callerInfo {
+func getCallerInfo(skip int) CallerInfo {
 	pc, file, line, ok := runtime.Caller(skip)
 	if !ok {
-		return callerInfo{}
+		return CallerInfo{}
 	}
 
 	var fn = runtime.FuncForPC(pc)
@@ -297,7 +291,7 @@ func getCallerInfo(skip int) callerInfo {
 
 	var displayFile = trimDirPrefix(file, getRunningDirPrefix())
 
-	return callerInfo{
+	return CallerInfo{
 		File: displayFile,
 		Line: line,
 		Pkg:  pkg,
@@ -315,11 +309,17 @@ func trimDirPrefix(file, prefix string) string {
 	return file
 }
 
-func formatAtCode(c callerInfo) string {
-	if c.Func != "" {
-		return fmt.Sprintf("%s:%d %s()", c.File, c.Line, c.Func)
+const gcpSourceLocationKey = "logging.googleapis.com/sourceLocation"
+
+func sourceLocation(c CallerInfo) map[string]any {
+	var loc = map[string]any{
+		"file": c.File,
+		"line": strconv.Itoa(c.Line),
 	}
-	return fmt.Sprintf("%s:%d", c.File, c.Line)
+	if c.Func != "" {
+		loc["function"] = c.Func
+	}
+	return loc
 }
 
 func captureStack() string {
