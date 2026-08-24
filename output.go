@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -198,9 +199,13 @@ func formatJSON(e entry) string {
 
 var runningDirPrefix string
 
+var runningDirPrefixMu sync.Mutex
+
 var getwd = os.Getwd
 
 func getRunningDirPrefix() string {
+	runningDirPrefixMu.Lock()
+	defer runningDirPrefixMu.Unlock()
 	if runningDirPrefix == "" {
 		workingDir, err := getwd()
 		if err != nil {
