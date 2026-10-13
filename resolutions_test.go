@@ -136,7 +136,7 @@ func TestResolve_DefaultFormatNoRace(t *testing.T) {
 	var original = defaultState.formatter()
 	defer SetDefaultFormat(original)
 	var origConsole = defaultState.console
-	defaultState.console = io.Discard
+	defaultState.console = &sink{w: io.Discard}
 	defer func() { defaultState.console = origConsole }()
 
 	var wg sync.WaitGroup

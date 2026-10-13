@@ -293,7 +293,7 @@ func TestErrf_NilError_NoOutput(t *testing.T) {
 
 func TestEmit_WritesToConsole(t *testing.T) {
 	var buf bytes.Buffer
-	var s = &state{config: Config{Level: LevelInfo, Formatter: HumanLogFormatter{}}, console: &buf}
+	var s = &state{config: Config{Level: LevelInfo, Formatter: HumanLogFormatter{}}, console: &sink{w: &buf}}
 	var ctx = context.WithValue(context.Background(), stateKey, s)
 
 	Info(ctx, "to console")

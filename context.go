@@ -22,7 +22,7 @@ func (s *state) clone() *state {
 		fields:      copyFields(s.fields),
 		scope:       s.scope,
 		console:     s.console,
-		writers:     append([]io.Writer(nil), s.writers...),
+		writers:     append([]*sink(nil), s.writers...),
 		suppressAll: s.suppressAll,
 		redact:      s.redact,
 	}
@@ -72,7 +72,7 @@ func SuppressConsoleOutput(ctx context.Context) context.Context {
 
 func AttachWriter(ctx context.Context, w io.Writer) context.Context {
 	var s = getState(ctx).clone()
-	s.writers = append(s.writers, w)
+	s.writers = append(s.writers, &sink{w: w})
 	return context.WithValue(ctx, stateKey, s)
 }
 

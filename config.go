@@ -2,7 +2,6 @@ package logs
 
 import (
 	"context"
-	"io"
 	"os"
 	"sync/atomic"
 )
@@ -54,8 +53,8 @@ type state struct {
 	config      Config
 	fields      map[string]any
 	scope       string
-	console     io.Writer
-	writers     []io.Writer
+	console     *sink
+	writers     []*sink
 	suppressAll bool
 	redact      RedactFunc
 }
@@ -65,7 +64,7 @@ var defaultState = &state{
 		Level:          LevelInfo,
 		StackTraceFrom: StackFrom(LevelError),
 	},
-	console: os.Stderr,
+	console: &sink{w: os.Stderr},
 }
 
 type formatterBox struct{ formatter LoggerFormatter }
@@ -84,13 +83,10 @@ func loadDefaultFormatter() LoggerFormatter {
 }
 
 func (s *state) formatter() LoggerFormatter {
-	if s == defaultState {
-		return loadDefaultFormatter()
-	}
 	if s.config.Formatter != nil {
 		return s.config.Formatter
 	}
-	return HumanLogFormatter{}
+	return loadDefaultFormatter()
 }
 
 func getState(ctx context.Context) *state {
@@ -112,20 +108,14 @@ func Attach(ctx context.Context, config Config) context.Context {
 	return context.WithValue(ctx, stateKey, s)
 }
 
-type syncer interface {
-	Sync() error
-}
-
 func Flush(ctx context.Context) error {
 	var s = getState(ctx)
-	if f, ok := s.console.(syncer); ok {
-		_ = f.Sync()
+	if s.console != nil {
+		_ = s.console.sync()
 	}
 	for _, w := range s.writers {
-		if f, ok := w.(syncer); ok {
-			if err := f.Sync(); err != nil {
-				return err
-			}
+		if err := w.sync(); err != nil {
+			return err
 		}
 	}
 	return nil

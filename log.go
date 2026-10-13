@@ -4,15 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"sync"
 	"time"
 )
 
 const callerSkipDepth = 3
 
 var exit = os.Exit
-
-var outputMu sync.Mutex
 
 func emit(ctx context.Context, level Level, msg string, err error) {
 	defer func() { _ = recover() }()
@@ -63,15 +60,12 @@ func applyRedaction(fn RedactFunc, src map[string]any) map[string]any {
 }
 
 func writeOutput(s *state, output []byte) {
-	outputMu.Lock()
-	defer outputMu.Unlock()
-
 	if s.console != nil {
-		s.console.Write(output)
+		s.console.write(output)
 	}
 
 	for _, w := range s.writers {
-		w.Write(output)
+		w.write(output)
 	}
 }
 

@@ -3,7 +3,6 @@ package logs
 import (
 	"context"
 	"errors"
-	"io"
 	"testing"
 )
 
@@ -67,7 +66,7 @@ func TestSetFormat_DoesNotMutateDefaultState(t *testing.T) {
 func TestFlush_SyncsConsoleAndWriters(t *testing.T) {
 	var console = &fakeSyncer{}
 	var writer = &fakeSyncer{}
-	var s = &state{console: console, writers: []io.Writer{writer}}
+	var s = &state{console: &sink{w: console}, writers: []*sink{{w: writer}}}
 	var ctx = context.WithValue(context.Background(), stateKey, s)
 
 	if err := Flush(ctx); err != nil {
@@ -83,7 +82,7 @@ func TestFlush_SyncsConsoleAndWriters(t *testing.T) {
 
 func TestFlush_IgnoresConsoleSyncError(t *testing.T) {
 	var console = &fakeSyncer{syncErr: errors.New("sync /dev/stderr: operation not supported by device")}
-	var s = &state{console: console}
+	var s = &state{console: &sink{w: console}}
 	var ctx = context.WithValue(context.Background(), stateKey, s)
 
 	if err := Flush(ctx); err != nil {
@@ -97,8 +96,8 @@ func TestFlush_IgnoresConsoleSyncError(t *testing.T) {
 func TestFlush_ReturnsWriterSyncError(t *testing.T) {
 	var wantErr = errors.New("writer sync failed")
 	var s = &state{
-		console: &fakeSyncer{},
-		writers: []io.Writer{&fakeSyncer{syncErr: wantErr}},
+		console: &sink{w: &fakeSyncer{}},
+		writers: []*sink{{w: &fakeSyncer{syncErr: wantErr}}},
 	}
 	var ctx = context.WithValue(context.Background(), stateKey, s)
 
