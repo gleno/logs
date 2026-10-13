@@ -36,6 +36,21 @@ func TestSetDefaultFormat_AppliesToDerivedContexts(t *testing.T) {
 	}
 }
 
+func TestSetDefaultFormat_AppliesToContextsDerivedEarlier(t *testing.T) {
+	var original = defaultState.formatter()
+	defer SetDefaultFormat(original)
+
+	var buf bytes.Buffer
+	var ctx = AttachWriter(SuppressConsoleOutput(WithScope(context.Background(), "svc")), &buf)
+	SetDefaultFormat(GCPLogFormatter{})
+
+	Info(ctx, "hello")
+
+	if !json.Valid(bytes.TrimSpace(buf.Bytes())) {
+		t.Errorf("default format should apply at log time, got non-JSON output: %q", buf.String())
+	}
+}
+
 func TestSetFormat_OverridesDefaultFormat(t *testing.T) {
 	var original = defaultState.formatter()
 	defer SetDefaultFormat(original)
