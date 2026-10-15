@@ -3,6 +3,7 @@ package logs
 import (
 	"bytes"
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -169,5 +170,41 @@ func TestGetState_NilContext(t *testing.T) {
 	var s = getState(nil)
 	if s == nil {
 		t.Fatal("expected default state for nil context")
+	}
+}
+
+func TestHideFields_HidesFromHumanOutputOnly(t *testing.T) {
+	var human = captureOutput(Config{Level: LevelInfo, Format: HumanReadable}, func(ctx context.Context) {
+		ctx = WithFields(ctx, map[string]any{"user_id": "u1", "route": "/x"})
+		Info(HideFields(ctx, "user_id"), "m")
+	})
+	if strings.Contains(human, "user_id=") || !strings.Contains(human, "route=") {
+		t.Errorf("expected user_id hidden and route shown, got: %s", human)
+	}
+
+	var structured = captureOutput(Config{Level: LevelInfo, Format: JSON}, func(ctx context.Context) {
+		ctx = WithFields(ctx, map[string]any{"user_id": "u1"})
+		Info(HideFields(ctx, "user_id"), "m")
+	})
+	if !strings.Contains(structured, `"user_id":"u1"`) {
+		t.Errorf("expected JSON to keep user_id, got: %s", structured)
+	}
+}
+
+func TestHideFields_DoesNotMutateParent(t *testing.T) {
+	var parent = HideFields(context.Background(), "a")
+	_ = HideFields(parent, "b")
+	if getState(parent).hidden["b"] {
+		t.Error("expected the parent's hidden set to stay without b")
+	}
+	if !getState(parent).hidden["a"] {
+		t.Error("expected the parent to keep a")
+	}
+}
+
+func TestHideFields_NoKeysReturnsSameContext(t *testing.T) {
+	var ctx = context.Background()
+	if HideFields(ctx) != ctx {
+		t.Error("expected the same context for no keys")
 	}
 }

@@ -7,13 +7,16 @@ import (
 
 func TestGetRunningDirPrefixIsConcurrencySafe(t *testing.T) {
 	var originalGetwd = getwd
+	var originalStat = statFile
 	var originalPrefix = runningDirPrefix
 	defer func() {
 		getwd = originalGetwd
+		statFile = originalStat
 		runningDirPrefix = originalPrefix
 	}()
 
 	getwd = func() (string, error) { return "/repo/apps/myservice", nil }
+	statFile = statOnly("/repo/go.mod")
 	runningDirPrefix = ""
 
 	var wg sync.WaitGroup

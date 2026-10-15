@@ -3,6 +3,7 @@ package logs
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -83,13 +84,42 @@ func TestFormatHuman_HiddenFieldsFiltered(t *testing.T) {
 		Level:     LevelInfo,
 		Message:   "msg",
 		Fields:    map[string]any{"app": "test", "env": "prod", "real_field": "keep"},
+		Hidden:    map[string]bool{"app": true},
 	}
 	var result = formatHuman(e)
 	if strings.Contains(result, "app=") {
 		t.Errorf("expected hidden field 'app' to be filtered, got: %s", result)
 	}
-	if !strings.Contains(result, "real_field=") {
-		t.Errorf("expected real_field to be kept, got: %s", result)
+	if !strings.Contains(result, "env=") || !strings.Contains(result, "real_field=") {
+		t.Errorf("expected unhidden fields to be kept, got: %s", result)
+	}
+}
+
+func TestFormatHuman_NoFieldIsHiddenByDefault(t *testing.T) {
+	var e = entry{
+		Timestamp: time.Now(),
+		Level:     LevelInfo,
+		Message:   "msg",
+		Fields:    map[string]any{"app": "test", "user_id": "u1", "http_path": "/x"},
+	}
+	var result = formatHuman(e)
+	for _, field := range []string{"app=", "user_id=", "http_path="} {
+		if !strings.Contains(result, field) {
+			t.Errorf("expected %s to be shown by default, got: %s", field, result)
+		}
+	}
+}
+
+func TestFormatJSON_KeepsHiddenFields(t *testing.T) {
+	var e = entry{
+		Timestamp: time.Now(),
+		Level:     LevelInfo,
+		Message:   "msg",
+		Fields:    map[string]any{"app": "test"},
+		Hidden:    map[string]bool{"app": true},
+	}
+	if result := formatJSON(e); !strings.Contains(result, `"app":"test"`) {
+		t.Errorf("expected JSON to keep a field hidden from human output, got: %s", result)
 	}
 }
 
@@ -374,19 +404,60 @@ func TestGetCallerInfo_UnresolvableReturnsEmpty(t *testing.T) {
 	}
 }
 
-func TestGetRunningDirPrefix_StripsAppsParent(t *testing.T) {
-	var originalGetwd = getwd
-	var originalPrefix = runningDirPrefix
-	defer func() {
-		getwd = originalGetwd
-		runningDirPrefix = originalPrefix
-	}()
+func statOnly(existing ...string) func(string) (os.FileInfo, error) {
+	return func(path string) (os.FileInfo, error) {
+		for _, e := range existing {
+			if path == e {
+				return nil, nil
+			}
+		}
+		return nil, os.ErrNotExist
+	}
+}
 
-	getwd = func() (string, error) { return "/repo/apps/myservice", nil }
+func withFakeWorkingDir(t *testing.T, workingDir string, existing ...string) {
+	var originalGetwd = getwd
+	var originalStat = statFile
+	var originalPrefix = runningDirPrefix
+	t.Cleanup(func() {
+		getwd = originalGetwd
+		statFile = originalStat
+		runningDirPrefix = originalPrefix
+	})
+	getwd = func() (string, error) { return workingDir, nil }
+	statFile = statOnly(existing...)
 	runningDirPrefix = ""
+}
+
+func TestGetRunningDirPrefix_IsTheNearestModuleRootAbove(t *testing.T) {
+	withFakeWorkingDir(t, "/repo/services/api/cmd", "/repo/go.mod", "/go.mod")
 
 	if got := getRunningDirPrefix(); got != "/repo" {
-		t.Errorf("expected apps parent stripped to /repo, got %s", got)
+		t.Errorf("expected nearest module root /repo, got %s", got)
+	}
+}
+
+func TestGetRunningDirPrefix_IsTheWorkingDirWhenItHoldsTheModule(t *testing.T) {
+	withFakeWorkingDir(t, "/repo", "/repo/go.mod")
+
+	if got := getRunningDirPrefix(); got != "/repo" {
+		t.Errorf("expected /repo, got %s", got)
+	}
+}
+
+func TestGetRunningDirPrefix_IsTheWorkingDirOutsideAnyModule(t *testing.T) {
+	withFakeWorkingDir(t, "/srv/app")
+
+	if got := getRunningDirPrefix(); got != "/srv/app" {
+		t.Errorf("expected working dir /srv/app outside a module, got %s", got)
+	}
+}
+
+func TestGetRunningDirPrefix_HasNoSpecialCaseForAppsDirectories(t *testing.T) {
+	withFakeWorkingDir(t, "/repo/apps/myservice", "/repo/apps/myservice/go.mod")
+
+	if got := getRunningDirPrefix(); got != "/repo/apps/myservice" {
+		t.Errorf("expected the module root /repo/apps/myservice, got %s", got)
 	}
 }
 

@@ -2,8 +2,11 @@ package logs
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
+	"strings"
+	"sync/atomic"
 )
 
 type Level int
@@ -33,6 +36,23 @@ func (l Level) String() string {
 	}
 }
 
+func ParseLevel(text string) (Level, error) {
+	switch strings.ToLower(strings.TrimSpace(text)) {
+	case "debug":
+		return LevelDebug, nil
+	case "info":
+		return LevelInfo, nil
+	case "warn", "warning":
+		return LevelWarning, nil
+	case "error":
+		return LevelError, nil
+	case "fatal":
+		return LevelFatal, nil
+	default:
+		return LevelInfo, fmt.Errorf("unknown log level %q: want debug, info, warning, error or fatal", text)
+	}
+}
+
 type OutputFormat int
 
 const (
@@ -53,33 +73,50 @@ var stateKey = &contextKeyType{}
 type state struct {
 	config      Config
 	fields      map[string]any
+	hidden      map[string]bool
 	scope       string
 	console     io.Writer
 	writers     []io.Writer
 	suppressAll bool
 }
 
-var defaultState = &state{
-	config: Config{
-		Level:          LevelInfo,
-		Format:         HumanReadable,
-		StackTraceFrom: LevelError,
-	},
-	console: os.Stderr,
+var defaultState atomic.Pointer[state]
+
+func init() {
+	defaultState.Store(&state{
+		config: Config{
+			Level:          LevelInfo,
+			Format:         HumanReadable,
+			StackTraceFrom: LevelError,
+		},
+		console: os.Stderr,
+	})
 }
 
 func SetDefaultFormat(format OutputFormat) {
-	defaultState.config.Format = format
+	for {
+		var current = defaultState.Load()
+		var next = current.clone()
+		next.config.Format = format
+		if defaultState.CompareAndSwap(current, next) {
+			return
+		}
+	}
 }
 
 func getState(ctx context.Context) *state {
 	if ctx == nil {
-		return defaultState
+		return defaultState.Load()
 	}
 	if s, ok := ctx.Value(stateKey).(*state); ok {
 		return s
 	}
-	return defaultState
+	return defaultState.Load()
+}
+
+func Enabled(ctx context.Context, level Level) bool {
+	var s = getState(ctx)
+	return !s.suppressAll && level >= s.config.Level
 }
 
 func Attach(ctx context.Context, config Config) context.Context {

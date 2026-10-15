@@ -12,27 +12,24 @@ const callerSkipDepth = 3
 var exit = os.Exit
 
 func emit(ctx context.Context, level Level, msg string, err error) {
-	var s = getState(ctx)
-
-	if level < s.config.Level {
+	if !Enabled(ctx, level) {
 		return
 	}
-
-	if s.suppressAll {
-		return
-	}
-
-	var e = entry{
+	write(getState(ctx), entry{
 		Timestamp: time.Now(),
 		Level:     level,
 		Message:   msg,
-		Fields:    s.fields,
-		Scope:     s.scope,
 		Caller:    getCallerInfo(callerSkipDepth),
 		Error:     err,
-	}
+	})
+}
 
-	if level >= s.config.StackTraceFrom {
+func write(s *state, e entry) {
+	e.Fields = mergeFields(s.fields, e.Fields)
+	e.Hidden = s.hidden
+	e.Scope = s.scope
+
+	if e.Level >= s.config.StackTraceFrom {
 		e.Stack = captureStack()
 	}
 
@@ -52,6 +49,20 @@ func emit(ctx context.Context, level Level, msg string, err error) {
 	for _, w := range s.writers {
 		w.Write(output)
 	}
+}
+
+func mergeFields(base, extra map[string]any) map[string]any {
+	if len(extra) == 0 {
+		return base
+	}
+	var merged = copyFields(base)
+	if merged == nil {
+		merged = make(map[string]any, len(extra))
+	}
+	for k, v := range extra {
+		merged[k] = v
+	}
+	return merged
 }
 
 func Debug(ctx context.Context, msg string) {
