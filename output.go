@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -24,6 +25,7 @@ type entry struct {
 	Level     Level
 	Message   string
 	Fields    map[string]any
+	Hidden    map[string]bool
 	Scope     string
 	Caller    callerInfo
 	Stack     string
@@ -38,16 +40,6 @@ const (
 	colorBlue   = "\x1b[34m"
 	colorGray   = "\x1b[90m"
 )
-
-var hiddenFields = map[string]bool{
-	"app": true, "env": true, "account_key": true,
-	"http_method": true, "http_uri": true, "namespace": true,
-	"origin_app_key": true, "origin_http_method": true, "origin_http_uri": true, "origin_remote_ip": true,
-	"http_host": true, "http_proto": true, "http_remote_addr": true, "http_scheme": true,
-	"http_url": true, "http_user_agent": true, "remote_ip": true,
-	"user_id": true, "http_route": true, "http_resp_bytes_length": true, "http_resp_status": true,
-	"http_path": true, "time_ms": true,
-}
 
 func getColorByLevel(level Level) string {
 	switch level {
@@ -118,7 +110,7 @@ func formatHuman(e entry) string {
 
 	var visibleFields = make(map[string]any, len(e.Fields))
 	for k, v := range e.Fields {
-		if !hiddenFields[k] {
+		if !e.Hidden[k] {
 			visibleFields[k] = v
 		}
 	}
@@ -203,6 +195,8 @@ var runningDirPrefixMu sync.Mutex
 
 var getwd = os.Getwd
 
+var statFile = os.Stat
+
 func getRunningDirPrefix() string {
 	runningDirPrefixMu.Lock()
 	defer runningDirPrefixMu.Unlock()
@@ -212,13 +206,20 @@ func getRunningDirPrefix() string {
 			runningDirPrefix = "."
 			return runningDirPrefix
 		}
-		runningDirPrefix = workingDir
-		var components = strings.Split(workingDir, "/")
-		if len(components) > 1 && components[len(components)-2] == "apps" {
-			runningDirPrefix = strings.Join(components[:len(components)-2], "/")
-		}
+		runningDirPrefix = findModuleRoot(workingDir)
 	}
 	return runningDirPrefix
+}
+
+func findModuleRoot(dir string) string {
+	for candidate := dir; ; candidate = filepath.Dir(candidate) {
+		if _, err := statFile(filepath.Join(candidate, "go.mod")); err == nil {
+			return candidate
+		}
+		if filepath.Dir(candidate) == candidate {
+			return dir
+		}
+	}
 }
 
 func getCallerInfo(skip int) callerInfo {
@@ -226,8 +227,18 @@ func getCallerInfo(skip int) callerInfo {
 	if !ok {
 		return callerInfo{}
 	}
+	return describeCaller(runtime.FuncForPC(pc), file, line)
+}
 
-	var fn = runtime.FuncForPC(pc)
+func getCallerInfoAt(pc uintptr) callerInfo {
+	if pc == 0 {
+		return callerInfo{}
+	}
+	var frame, _ = runtime.CallersFrames([]uintptr{pc}).Next()
+	return describeCaller(frame.Func, frame.File, frame.Line)
+}
+
+func describeCaller(fn *runtime.Func, file string, line int) callerInfo {
 	var pkg, funcName string
 	if fn != nil {
 		var name = fn.Name()

@@ -16,10 +16,22 @@ func copyFields(src map[string]any) map[string]any {
 	return dst
 }
 
+func copyHidden(src map[string]bool) map[string]bool {
+	if len(src) == 0 {
+		return nil
+	}
+	var dst = make(map[string]bool, len(src))
+	for k := range src {
+		dst[k] = true
+	}
+	return dst
+}
+
 func (s *state) clone() *state {
 	return &state{
 		config:      s.config,
 		fields:      copyFields(s.fields),
+		hidden:      copyHidden(s.hidden),
 		scope:       s.scope,
 		console:     s.console,
 		writers:     append([]io.Writer(nil), s.writers...),
@@ -42,6 +54,23 @@ func WithFields(ctx context.Context, fields map[string]any) context.Context {
 			continue
 		}
 		s.fields[k] = v
+	}
+
+	return context.WithValue(ctx, stateKey, s)
+}
+
+func HideFields(ctx context.Context, keys ...string) context.Context {
+	if len(keys) == 0 {
+		return ctx
+	}
+
+	var s = getState(ctx).clone()
+
+	if s.hidden == nil {
+		s.hidden = make(map[string]bool, len(keys))
+	}
+	for _, k := range keys {
+		s.hidden[k] = true
 	}
 
 	return context.WithValue(ctx, stateKey, s)

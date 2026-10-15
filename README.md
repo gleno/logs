@@ -16,10 +16,12 @@ go get github.com/gleno/logs
 - **Structured fields** — attach key/value pairs to a context; they appear on every log line emitted with it.
 - **Scopes** — build dot-separated scope paths (`engine.ingestion`) that nest as you descend through your call tree.
 - **Two output formats** — colorized human-readable output for terminals, or structured JSON for log aggregation.
-- **Caller info** — file, line, and function captured automatically on every entry.
+- **Caller info** — file, line, and function captured automatically on every entry, with paths shown relative to your module root.
 - **Stack traces** — captured automatically at and above a configurable level.
 - **Error helpers** — `Err`/`Errf` log an `error` value with its message attached as a structured field.
 - **Pluggable writers** — fan out to any number of `io.Writer`s, suppress the console, or silence everything.
+- **Hidden fields** — keep chosen fields out of human-readable output while JSON still carries them.
+- **`log/slog` handler** — route `slog` records from your code or libraries through the same context, fields and writers.
 - **`io.Writer` adapter** — turn the logger into an `io.WriteCloser` to capture output from libraries that write to a stream.
 
 ## Usage
@@ -66,7 +68,7 @@ if err := doWork(ctx); err != nil {
 
 ### Setting the output format
 
-Set the process-wide default format once at startup with `SetDefaultFormat`. Use `JSON` in production, `HumanReadable` for local development.
+Set the process-wide default format with `SetDefaultFormat`, usually once at startup. Use `JSON` in production, `HumanReadable` for local development. It is safe to call while other goroutines log; contexts that set their own format keep it.
 
 ```go
 func main() {
@@ -106,6 +108,24 @@ logs.Debug(ctx, "now visible")
 
 The levels are `LevelDebug`, `LevelInfo`, `LevelWarning`, `LevelError`, `LevelFatal`. The formats are `HumanReadable` and `JSON`.
 
+`ParseLevel` reads a level from text such as an environment variable. It accepts `debug`, `info`, `warn`/`warning`, `error` and `fatal` in any case:
+
+```go
+level, err := logs.ParseLevel(os.Getenv("LOG_LEVEL"))
+if err != nil {
+	level = logs.LevelInfo
+}
+ctx = logs.Attach(ctx, logs.Config{Level: level})
+```
+
+`Enabled` reports whether a level would be emitted with a context, so you can skip building an expensive message:
+
+```go
+if logs.Enabled(ctx, logs.LevelDebug) {
+	logs.Debugf(ctx, "state: %s", dumpState())
+}
+```
+
 ### Structured fields
 
 `WithFields` returns a derived context carrying key/value pairs. Every log emitted with that context (and its descendants) includes them. Fields accumulate as you derive further contexts; `nil` values are dropped, and parent contexts are never mutated.
@@ -123,6 +143,17 @@ logs.Info(ctx, "retrying")          // request_id, user_id, and attempt all pres
 ```
 
 In JSON output, fields appear under the `data` key. In human-readable output, they render as `key="value"` pairs beneath the message.
+
+### Hiding fields from human-readable output
+
+`HideFields` returns a derived context whose human-readable output leaves out the named fields. JSON output still carries them, so they stay searchable in your log store without cluttering a terminal. No field is hidden by default.
+
+```go
+ctx = logs.WithFields(ctx, map[string]any{"user_agent": ua, "route": route})
+ctx = logs.HideFields(ctx, "user_agent")
+
+logs.Info(ctx, "served") // terminal shows route only; JSON has both
+```
 
 ### Scopes
 
@@ -152,6 +183,21 @@ ctx = logs.SuppressAllOutput(ctx)         // drop everything, including attached
 ```go
 defer logs.Flush(ctx)
 ```
+
+### Using `log/slog`
+
+`NewSlogHandler` returns a `slog.Handler` that writes through the context it was made from: its level, format, fields, hidden fields and writers. Use it for your own `slog` calls or to hand a `*slog.Logger` to a library.
+
+```go
+logger := slog.New(logs.NewSlogHandler(ctx))
+logger.With("component", "db").Info("connected", "pool", "main")
+```
+
+Records map to levels as `Debug` → `LevelDebug`, `Info` → `LevelInfo`, `Warn` → `LevelWarning`, and `Error` and above → `LevelError`. Attributes become fields; groups qualify their keys with dots (`db.pool`); `error` values are recorded as their message; `LogValuer`s are resolved. The caller shown is the `slog` call site.
+
+### Caller paths
+
+File paths in caller info are shown relative to the nearest directory above the working directory that holds a `go.mod`, or relative to the working directory when there is none. Binaries built with `-trimpath` already carry module-relative paths and are shown as built.
 
 ### Capturing a stream as log lines
 
