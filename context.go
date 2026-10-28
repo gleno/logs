@@ -16,26 +16,15 @@ func copyFields(src map[string]any) map[string]any {
 	return dst
 }
 
-func copyHidden(src map[string]bool) map[string]bool {
-	if len(src) == 0 {
-		return nil
-	}
-	var dst = make(map[string]bool, len(src))
-	for k := range src {
-		dst[k] = true
-	}
-	return dst
-}
-
 func (s *state) clone() *state {
 	return &state{
 		config:      s.config,
 		fields:      copyFields(s.fields),
-		hidden:      copyHidden(s.hidden),
 		scope:       s.scope,
 		console:     s.console,
-		writers:     append([]io.Writer(nil), s.writers...),
+		writers:     append([]*sink(nil), s.writers...),
 		suppressAll: s.suppressAll,
+		redact:      s.redact,
 	}
 }
 
@@ -59,24 +48,11 @@ func WithFields(ctx context.Context, fields map[string]any) context.Context {
 	return context.WithValue(ctx, stateKey, s)
 }
 
-func HideFields(ctx context.Context, keys ...string) context.Context {
-	if len(keys) == 0 {
+func WithScope(ctx context.Context, scope string) context.Context {
+	if scope == "" {
 		return ctx
 	}
 
-	var s = getState(ctx).clone()
-
-	if s.hidden == nil {
-		s.hidden = make(map[string]bool, len(keys))
-	}
-	for _, k := range keys {
-		s.hidden[k] = true
-	}
-
-	return context.WithValue(ctx, stateKey, s)
-}
-
-func WithScope(ctx context.Context, scope string) context.Context {
 	var s = getState(ctx).clone()
 
 	if s.scope == "" {
@@ -84,11 +60,6 @@ func WithScope(ctx context.Context, scope string) context.Context {
 	} else {
 		s.scope = s.scope + "." + scope
 	}
-
-	if s.fields == nil {
-		s.fields = make(map[string]any, 1)
-	}
-	s.fields["scope"] = s.scope
 
 	return context.WithValue(ctx, stateKey, s)
 }
@@ -101,12 +72,18 @@ func SuppressConsoleOutput(ctx context.Context) context.Context {
 
 func AttachWriter(ctx context.Context, w io.Writer) context.Context {
 	var s = getState(ctx).clone()
-	s.writers = append(s.writers, w)
+	s.writers = append(s.writers, &sink{w: w})
 	return context.WithValue(ctx, stateKey, s)
 }
 
 func SuppressAllOutput(ctx context.Context) context.Context {
 	var s = getState(ctx).clone()
 	s.suppressAll = true
+	return context.WithValue(ctx, stateKey, s)
+}
+
+func WithRedaction(ctx context.Context, fn RedactFunc) context.Context {
+	var s = getState(ctx).clone()
+	s.redact = fn
 	return context.WithValue(ctx, stateKey, s)
 }

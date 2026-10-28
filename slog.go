@@ -46,7 +46,7 @@ func (h *slogHandler) Handle(_ context.Context, record slog.Record) error {
 		return true
 	})
 
-	var e = entry{
+	var e = Entry{
 		Timestamp: record.Time,
 		Level:     levelOfSlog(record.Level),
 		Message:   record.Message,

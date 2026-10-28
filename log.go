@@ -12,10 +12,11 @@ const callerSkipDepth = 3
 var exit = os.Exit
 
 func emit(ctx context.Context, level Level, msg string, err error) {
+	defer func() { _ = recover() }()
 	if !Enabled(ctx, level) {
 		return
 	}
-	write(getState(ctx), entry{
+	write(getState(ctx), Entry{
 		Timestamp: time.Now(),
 		Level:     level,
 		Message:   msg,
@@ -24,31 +25,17 @@ func emit(ctx context.Context, level Level, msg string, err error) {
 	})
 }
 
-func write(s *state, e entry) {
+func write(s *state, e Entry) {
+	defer func() { _ = recover() }()
 	e.Fields = mergeFields(s.fields, e.Fields)
-	e.Hidden = s.hidden
+	if s.redact != nil {
+		e.Fields = applyRedaction(s.redact, e.Fields)
+	}
 	e.Scope = s.scope
-
-	if e.Level >= s.config.StackTraceFrom {
+	if s.config.StackTraceFrom != nil && e.Level >= *s.config.StackTraceFrom {
 		e.Stack = captureStack()
 	}
-
-	var formatted string
-	if s.config.Format == JSON {
-		formatted = formatJSON(e)
-	} else {
-		formatted = formatHuman(e)
-	}
-
-	var output = []byte(formatted)
-
-	if s.console != nil {
-		s.console.Write(output)
-	}
-
-	for _, w := range s.writers {
-		w.Write(output)
-	}
+	writeOutput(s, s.formatter().Format(e))
 }
 
 func mergeFields(base, extra map[string]any) map[string]any {
@@ -63,6 +50,29 @@ func mergeFields(base, extra map[string]any) map[string]any {
 		merged[k] = v
 	}
 	return merged
+}
+
+func applyRedaction(fn RedactFunc, src map[string]any) map[string]any {
+	if len(src) == 0 {
+		return nil
+	}
+	var out = make(map[string]any, len(src))
+	for k, v := range src {
+		if nv, keep := fn(k, v); keep {
+			out[k] = nv
+		}
+	}
+	return out
+}
+
+func writeOutput(s *state, output []byte) {
+	if s.console != nil {
+		s.console.write(output)
+	}
+
+	for _, w := range s.writers {
+		w.write(output)
+	}
 }
 
 func Debug(ctx context.Context, msg string) {

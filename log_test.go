@@ -19,7 +19,7 @@ func captureOutput(config Config, fn func(ctx context.Context)) string {
 }
 
 func TestInfo_WritesToWriter(t *testing.T) {
-	var output = captureOutput(Config{Level: LevelInfo, Format: HumanReadable}, func(ctx context.Context) {
+	var output = captureOutput(Config{Level: LevelInfo, Formatter: HumanLogFormatter{}}, func(ctx context.Context) {
 		Info(ctx, "hello world")
 	})
 	if !strings.Contains(output, "hello world") {
@@ -31,7 +31,7 @@ func TestInfo_WritesToWriter(t *testing.T) {
 }
 
 func TestInfof_FormatsMessage(t *testing.T) {
-	var output = captureOutput(Config{Level: LevelInfo, Format: HumanReadable}, func(ctx context.Context) {
+	var output = captureOutput(Config{Level: LevelInfo, Formatter: HumanLogFormatter{}}, func(ctx context.Context) {
 		Infof(ctx, "batch %s started with %d items", "abc", 42)
 	})
 	if !strings.Contains(output, "batch abc started with 42 items") {
@@ -40,7 +40,7 @@ func TestInfof_FormatsMessage(t *testing.T) {
 }
 
 func TestDebug_FilteredAtInfoLevel(t *testing.T) {
-	var output = captureOutput(Config{Level: LevelInfo, Format: HumanReadable}, func(ctx context.Context) {
+	var output = captureOutput(Config{Level: LevelInfo, Formatter: HumanLogFormatter{}}, func(ctx context.Context) {
 		Debug(ctx, "should not appear")
 	})
 	if strings.Contains(output, "should not appear") {
@@ -49,7 +49,7 @@ func TestDebug_FilteredAtInfoLevel(t *testing.T) {
 }
 
 func TestDebug_ShownAtDebugLevel(t *testing.T) {
-	var output = captureOutput(Config{Level: LevelDebug, Format: HumanReadable}, func(ctx context.Context) {
+	var output = captureOutput(Config{Level: LevelDebug, Formatter: HumanLogFormatter{}}, func(ctx context.Context) {
 		Debug(ctx, "visible debug")
 	})
 	if !strings.Contains(output, "visible debug") {
@@ -58,7 +58,7 @@ func TestDebug_ShownAtDebugLevel(t *testing.T) {
 }
 
 func TestError_WritesAtErrorLevel(t *testing.T) {
-	var output = captureOutput(Config{Level: LevelInfo, Format: HumanReadable}, func(ctx context.Context) {
+	var output = captureOutput(Config{Level: LevelInfo, Formatter: HumanLogFormatter{}}, func(ctx context.Context) {
 		Error(ctx, "something broke")
 	})
 	if !strings.Contains(output, "ERROR") {
@@ -70,7 +70,7 @@ func TestError_WritesAtErrorLevel(t *testing.T) {
 }
 
 func TestWarn_WritesAtWarnLevel(t *testing.T) {
-	var output = captureOutput(Config{Level: LevelInfo, Format: HumanReadable}, func(ctx context.Context) {
+	var output = captureOutput(Config{Level: LevelInfo, Formatter: HumanLogFormatter{}}, func(ctx context.Context) {
 		Warn(ctx, "caution")
 	})
 	if !strings.Contains(output, "WARNING") {
@@ -79,7 +79,7 @@ func TestWarn_WritesAtWarnLevel(t *testing.T) {
 }
 
 func TestErr_CapturesError(t *testing.T) {
-	var output = captureOutput(Config{Level: LevelInfo, Format: JSON}, func(ctx context.Context) {
+	var output = captureOutput(Config{Level: LevelInfo, Formatter: GCPLogFormatter{}}, func(ctx context.Context) {
 		Err(ctx, fmt.Errorf("connection refused"))
 	})
 
@@ -96,7 +96,7 @@ func TestErr_CapturesError(t *testing.T) {
 }
 
 func TestErrf_CapturesErrorWithContext(t *testing.T) {
-	var output = captureOutput(Config{Level: LevelInfo, Format: JSON}, func(ctx context.Context) {
+	var output = captureOutput(Config{Level: LevelInfo, Formatter: GCPLogFormatter{}}, func(ctx context.Context) {
 		Errf(ctx, fmt.Errorf("timeout"), "batch %s failed", "abc")
 	})
 
@@ -113,7 +113,7 @@ func TestErrf_CapturesErrorWithContext(t *testing.T) {
 }
 
 func TestWithFields_AppearsInOutput(t *testing.T) {
-	var output = captureOutput(Config{Level: LevelInfo, Format: JSON}, func(ctx context.Context) {
+	var output = captureOutput(Config{Level: LevelInfo, Formatter: GCPLogFormatter{}}, func(ctx context.Context) {
 		ctx = WithFields(ctx, map[string]any{"batch": "xyz"})
 		Info(ctx, "processing")
 	})
@@ -133,7 +133,7 @@ func TestWithFields_AppearsInOutput(t *testing.T) {
 
 func TestSuppressConsoleOutput_WritersStillReceive(t *testing.T) {
 	var buf bytes.Buffer
-	var ctx = Attach(context.Background(), Config{Level: LevelInfo, Format: HumanReadable})
+	var ctx = Attach(context.Background(), Config{Level: LevelInfo, Formatter: HumanLogFormatter{}})
 	ctx = SuppressConsoleOutput(ctx)
 	ctx = AttachWriter(ctx, &buf)
 
@@ -145,7 +145,7 @@ func TestSuppressConsoleOutput_WritersStillReceive(t *testing.T) {
 
 func TestSuppressAllOutput_NothingWritten(t *testing.T) {
 	var buf bytes.Buffer
-	var ctx = Attach(context.Background(), Config{Level: LevelInfo, Format: HumanReadable})
+	var ctx = Attach(context.Background(), Config{Level: LevelInfo, Formatter: HumanLogFormatter{}})
 	ctx = AttachWriter(ctx, &buf)
 	ctx = SuppressAllOutput(ctx)
 
@@ -157,7 +157,7 @@ func TestSuppressAllOutput_NothingWritten(t *testing.T) {
 
 func TestMultipleWriters_AllReceive(t *testing.T) {
 	var buf1, buf2 bytes.Buffer
-	var ctx = Attach(context.Background(), Config{Level: LevelInfo, Format: HumanReadable})
+	var ctx = Attach(context.Background(), Config{Level: LevelInfo, Formatter: HumanLogFormatter{}})
 	ctx = SuppressConsoleOutput(ctx)
 	ctx = AttachWriter(ctx, &buf1)
 	ctx = AttachWriter(ctx, &buf2)
@@ -172,7 +172,7 @@ func TestMultipleWriters_AllReceive(t *testing.T) {
 }
 
 func TestJSON_Output(t *testing.T) {
-	var output = captureOutput(Config{Level: LevelInfo, Format: JSON}, func(ctx context.Context) {
+	var output = captureOutput(Config{Level: LevelInfo, Formatter: GCPLogFormatter{}}, func(ctx context.Context) {
 		Info(ctx, "json test")
 	})
 
@@ -186,7 +186,7 @@ func TestJSON_Output(t *testing.T) {
 }
 
 func TestCallerInfo_AppearsInOutput(t *testing.T) {
-	var output = captureOutput(Config{Level: LevelInfo, Format: JSON}, func(ctx context.Context) {
+	var output = captureOutput(Config{Level: LevelInfo, Formatter: GCPLogFormatter{}}, func(ctx context.Context) {
 		Info(ctx, "caller test")
 	})
 
@@ -194,24 +194,21 @@ func TestCallerInfo_AppearsInOutput(t *testing.T) {
 	if err := json.Unmarshal([]byte(output), &parsed); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
-	data, ok := parsed["data"].(map[string]any)
+	loc, ok := parsed["logging.googleapis.com/sourceLocation"].(map[string]any)
 	if !ok {
-		t.Fatalf("expected jsonPayload.data to be an object, got %T", parsed["data"])
+		t.Fatalf("expected GCP sourceLocation object, got %T", parsed["logging.googleapis.com/sourceLocation"])
 	}
-	code, ok := data["@code"].(string)
-	if !ok || code == "" {
-		t.Error("expected non-empty @code field in data")
-	}
-	if !strings.Contains(code, "log_test.go") {
-		t.Errorf("expected @code to reference log_test.go, got: %s", code)
+	file, ok := loc["file"].(string)
+	if !ok || !strings.Contains(file, "log_test.go") {
+		t.Errorf("expected sourceLocation.file to reference log_test.go, got: %v", loc["file"])
 	}
 }
 
 func TestStackTrace_IncludedAtErrorLevel(t *testing.T) {
 	var output = captureOutput(Config{
 		Level:          LevelInfo,
-		Format:         JSON,
-		StackTraceFrom: LevelError,
+		Formatter:      GCPLogFormatter{},
+		StackTraceFrom: StackFrom(LevelError),
 	}, func(ctx context.Context) {
 		Error(ctx, "with stack")
 	})
@@ -228,8 +225,8 @@ func TestStackTrace_IncludedAtErrorLevel(t *testing.T) {
 func TestStackTrace_NotIncludedBelowThreshold(t *testing.T) {
 	var output = captureOutput(Config{
 		Level:          LevelInfo,
-		Format:         JSON,
-		StackTraceFrom: LevelError,
+		Formatter:      GCPLogFormatter{},
+		StackTraceFrom: StackFrom(LevelError),
 	}, func(ctx context.Context) {
 		Warn(ctx, "no stack")
 	})
@@ -244,7 +241,7 @@ func TestStackTrace_NotIncludedBelowThreshold(t *testing.T) {
 }
 
 func TestErr_NilError_NoOutput(t *testing.T) {
-	var output = captureOutput(Config{Level: LevelInfo, Format: JSON}, func(ctx context.Context) {
+	var output = captureOutput(Config{Level: LevelInfo, Formatter: GCPLogFormatter{}}, func(ctx context.Context) {
 		Err(ctx, nil)
 	})
 	if output != "" {
@@ -253,7 +250,7 @@ func TestErr_NilError_NoOutput(t *testing.T) {
 }
 
 func TestDebugf_FormatsAtDebugLevel(t *testing.T) {
-	var output = captureOutput(Config{Level: LevelDebug, Format: HumanReadable}, func(ctx context.Context) {
+	var output = captureOutput(Config{Level: LevelDebug, Formatter: HumanLogFormatter{}}, func(ctx context.Context) {
 		Debugf(ctx, "value is %d", 7)
 	})
 	if !strings.Contains(output, "value is 7") {
@@ -262,7 +259,7 @@ func TestDebugf_FormatsAtDebugLevel(t *testing.T) {
 }
 
 func TestWarnf_FormatsMessage(t *testing.T) {
-	var output = captureOutput(Config{Level: LevelInfo, Format: HumanReadable}, func(ctx context.Context) {
+	var output = captureOutput(Config{Level: LevelInfo, Formatter: HumanLogFormatter{}}, func(ctx context.Context) {
 		Warnf(ctx, "low on %s", "memory")
 	})
 	if !strings.Contains(output, "low on memory") {
@@ -274,7 +271,7 @@ func TestWarnf_FormatsMessage(t *testing.T) {
 }
 
 func TestErrorf_FormatsMessage(t *testing.T) {
-	var output = captureOutput(Config{Level: LevelInfo, Format: HumanReadable}, func(ctx context.Context) {
+	var output = captureOutput(Config{Level: LevelInfo, Formatter: HumanLogFormatter{}}, func(ctx context.Context) {
 		Errorf(ctx, "code %d failed", 500)
 	})
 	if !strings.Contains(output, "code 500 failed") {
@@ -286,7 +283,7 @@ func TestErrorf_FormatsMessage(t *testing.T) {
 }
 
 func TestErrf_NilError_NoOutput(t *testing.T) {
-	var output = captureOutput(Config{Level: LevelInfo, Format: JSON}, func(ctx context.Context) {
+	var output = captureOutput(Config{Level: LevelInfo, Formatter: GCPLogFormatter{}}, func(ctx context.Context) {
 		Errf(ctx, nil, "ignored %s", "msg")
 	})
 	if output != "" {
@@ -296,7 +293,7 @@ func TestErrf_NilError_NoOutput(t *testing.T) {
 
 func TestEmit_WritesToConsole(t *testing.T) {
 	var buf bytes.Buffer
-	var s = &state{config: Config{Level: LevelInfo, Format: HumanReadable}, console: &buf}
+	var s = &state{config: Config{Level: LevelInfo, Formatter: HumanLogFormatter{}}, console: &sink{w: &buf}}
 	var ctx = context.WithValue(context.Background(), stateKey, s)
 
 	Info(ctx, "to console")
@@ -330,7 +327,7 @@ func TestFatalf_ExitsWithCodeOne(t *testing.T) {
 }
 
 func TestWithScope_AppearsInOutput(t *testing.T) {
-	var output = captureOutput(Config{Level: LevelInfo, Format: JSON}, func(ctx context.Context) {
+	var output = captureOutput(Config{Level: LevelInfo, Formatter: GCPLogFormatter{}}, func(ctx context.Context) {
 		ctx = WithScope(ctx, "engine")
 		ctx = WithScope(ctx, "ingestion")
 		Info(ctx, "scoped msg")
@@ -340,8 +337,12 @@ func TestWithScope_AppearsInOutput(t *testing.T) {
 	if err := json.Unmarshal([]byte(output), &parsed); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
-	data, _ := parsed["data"].(map[string]any)
-	if data["scope"] != "engine.ingestion" {
-		t.Errorf("expected scope engine.ingestion, got %v", data["scope"])
+	if parsed["scope"] != "engine.ingestion" {
+		t.Errorf("expected top-level scope engine.ingestion, got %v", parsed["scope"])
+	}
+	if data, ok := parsed["data"].(map[string]any); ok {
+		if _, exists := data["scope"]; exists {
+			t.Error("scope must not appear inside data")
+		}
 	}
 }

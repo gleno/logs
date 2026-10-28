@@ -4,30 +4,31 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
-type callerInfo struct {
+type CallerInfo struct {
 	File string
 	Line int
 	Pkg  string
 	Func string
 }
 
-type entry struct {
+type Entry struct {
 	Timestamp time.Time
 	Level     Level
 	Message   string
 	Fields    map[string]any
-	Hidden    map[string]bool
 	Scope     string
-	Caller    callerInfo
+	Caller    CallerInfo
 	Stack     string
 	Error     error
 }
@@ -91,37 +92,35 @@ func formatFieldValue(value any) string {
 	}
 }
 
-func formatHuman(e entry) string {
+func formatHuman(e Entry) string {
 	var buf bytes.Buffer
 
 	var levelColor = getColorByLevel(e.Level)
 	var timestamp = e.Timestamp.Format("15:04:05")
 
-	fmt.Fprintf(&buf, "%s%-7s%s[%s] %s",
+	fmt.Fprintf(&buf, "%s%-7s%s[%s] ",
 		levelColor,
 		e.Level.String(),
 		colorReset,
-		timestamp,
-		e.Message)
+		timestamp)
+
+	if e.Scope != "" {
+		fmt.Fprintf(&buf, "%s[%s]%s ", colorDim, e.Scope, colorReset)
+	}
+
+	buf.WriteString(e.Message)
 
 	if e.Caller.File != "" {
 		fmt.Fprintf(&buf, " %s(%s:%d)%s", colorDim, e.Caller.File, e.Caller.Line, colorReset)
 	}
 
-	var visibleFields = make(map[string]any, len(e.Fields))
-	for k, v := range e.Fields {
-		if !e.Hidden[k] {
-			visibleFields[k] = v
-		}
-	}
-
-	if len(visibleFields) > 0 {
+	if len(e.Fields) > 0 {
 		buf.WriteString("\n")
 		buf.WriteString(colorDim)
 		buf.WriteString("    ")
 
-		var keys = make([]string, 0, len(visibleFields))
-		for k := range visibleFields {
+		var keys = make([]string, 0, len(e.Fields))
+		for k := range e.Fields {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
@@ -130,7 +129,7 @@ func formatHuman(e entry) string {
 			if i > 0 {
 				buf.WriteString(" ")
 			}
-			fmt.Fprintf(&buf, "%s=%s", k, formatFieldValue(visibleFields[k]))
+			fmt.Fprintf(&buf, "%s=%s", k, formatFieldValue(e.Fields[k]))
 		}
 		buf.WriteString(colorReset)
 	}
@@ -147,30 +146,36 @@ func formatHuman(e entry) string {
 	return buf.String()
 }
 
-func formatJSON(e entry) string {
+func formatJSON(e Entry) string {
+	if b, ok := tryMarshal(jsonEntryMap(e, e.Fields)); ok {
+		return string(append(b, '\n'))
+	}
+
+	var b, _ = json.Marshal(jsonEntryMap(e, sanitizeFields(e.Fields)))
+	return string(append(b, '\n'))
+}
+
+func jsonEntryMap(e Entry, fields map[string]any) map[string]any {
 	var m = map[string]any{
 		"timestamp": e.Timestamp.Format(time.RFC3339Nano),
 		"severity":  e.Level.String(),
 		"message":   e.Message,
 	}
 
-	var data map[string]any
-	if len(e.Fields) > 0 {
-		data = make(map[string]any, len(e.Fields)+1)
-		for k, v := range e.Fields {
+	if e.Scope != "" {
+		m["scope"] = e.Scope
+	}
+
+	if len(fields) > 0 {
+		var data = make(map[string]any, len(fields))
+		for k, v := range fields {
 			data[k] = v
 		}
+		m["data"] = data
 	}
 
 	if e.Caller.File != "" {
-		if data == nil {
-			data = make(map[string]any, 1)
-		}
-		data["@code"] = formatAtCode(e.Caller)
-	}
-
-	if data != nil {
-		m["data"] = data
+		m[gcpSourceLocationKey] = sourceLocation(e.Caller)
 	}
 
 	if e.Stack != "" {
@@ -181,12 +186,65 @@ func formatJSON(e entry) string {
 		m["error"] = e.Error.Error()
 	}
 
-	var b, err = json.Marshal(m)
-	if err != nil {
-		return fmt.Sprintf(`{"severity":"ERROR","message":"failed to marshal log entry: %s"}`, err)
+	return m
+}
+
+func tryMarshal(m map[string]any) (b []byte, ok bool) {
+	defer func() {
+		if recover() != nil {
+			b, ok = nil, false
+		}
+	}()
+	var err error
+	b, err = json.Marshal(m)
+	return b, err == nil
+}
+
+func sanitizeFields(fields map[string]any) map[string]any {
+	var out = make(map[string]any, len(fields))
+	for k, v := range fields {
+		out[k] = sanitizeValue(v)
 	}
-	b = append(b, '\n')
-	return string(b)
+	return out
+}
+
+func sanitizeValue(v any) any {
+	switch f := v.(type) {
+	case float64:
+		if s, ok := nonFiniteString(f); ok {
+			return s
+		}
+	case float32:
+		if s, ok := nonFiniteString(float64(f)); ok {
+			return s
+		}
+	}
+	if marshalsOK(v) {
+		return v
+	}
+	return fmt.Sprintf("!ERR(%T)", v)
+}
+
+func nonFiniteString(f float64) (string, bool) {
+	switch {
+	case math.IsNaN(f):
+		return "NaN", true
+	case math.IsInf(f, 1):
+		return "+Inf", true
+	case math.IsInf(f, -1):
+		return "-Inf", true
+	}
+	return "", false
+}
+
+func marshalsOK(v any) (ok bool) {
+	defer func() {
+		if recover() != nil {
+			ok = false
+		}
+	}()
+	var _, err = json.Marshal(v)
+	return err == nil
 }
 
 var runningDirPrefix string
@@ -222,23 +280,23 @@ func findModuleRoot(dir string) string {
 	}
 }
 
-func getCallerInfo(skip int) callerInfo {
+func getCallerInfo(skip int) CallerInfo {
 	pc, file, line, ok := runtime.Caller(skip)
 	if !ok {
-		return callerInfo{}
+		return CallerInfo{}
 	}
 	return describeCaller(runtime.FuncForPC(pc), file, line)
 }
 
-func getCallerInfoAt(pc uintptr) callerInfo {
+func getCallerInfoAt(pc uintptr) CallerInfo {
 	if pc == 0 {
-		return callerInfo{}
+		return CallerInfo{}
 	}
 	var frame, _ = runtime.CallersFrames([]uintptr{pc}).Next()
 	return describeCaller(frame.Func, frame.File, frame.Line)
 }
 
-func describeCaller(fn *runtime.Func, file string, line int) callerInfo {
+func describeCaller(fn *runtime.Func, file string, line int) CallerInfo {
 	var pkg, funcName string
 	if fn != nil {
 		var name = fn.Name()
@@ -253,7 +311,7 @@ func describeCaller(fn *runtime.Func, file string, line int) callerInfo {
 
 	var displayFile = trimDirPrefix(file, getRunningDirPrefix())
 
-	return callerInfo{
+	return CallerInfo{
 		File: displayFile,
 		Line: line,
 		Pkg:  pkg,
@@ -271,11 +329,17 @@ func trimDirPrefix(file, prefix string) string {
 	return file
 }
 
-func formatAtCode(c callerInfo) string {
-	if c.Func != "" {
-		return fmt.Sprintf("%s:%d %s()", c.File, c.Line, c.Func)
+const gcpSourceLocationKey = "logging.googleapis.com/sourceLocation"
+
+func sourceLocation(c CallerInfo) map[string]any {
+	var loc = map[string]any{
+		"file": c.File,
+		"line": strconv.Itoa(c.Line),
 	}
-	return fmt.Sprintf("%s:%d", c.File, c.Line)
+	if c.Func != "" {
+		loc["function"] = c.Func
+	}
+	return loc
 }
 
 func captureStack() string {

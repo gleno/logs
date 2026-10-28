@@ -8,7 +8,7 @@ import (
 )
 
 func writerContext(buf *bytes.Buffer) context.Context {
-	var ctx = Attach(context.Background(), Config{Level: LevelDebug, Format: HumanReadable})
+	var ctx = Attach(context.Background(), Config{Level: LevelDebug, Formatter: HumanLogFormatter{}})
 	ctx = SuppressConsoleOutput(ctx)
 	return AttachWriter(ctx, buf)
 }

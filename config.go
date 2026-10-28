@@ -3,7 +3,6 @@ package logs
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -53,18 +52,17 @@ func ParseLevel(text string) (Level, error) {
 	}
 }
 
-type OutputFormat int
-
-const (
-	HumanReadable OutputFormat = iota
-	JSON
-)
-
 type Config struct {
 	Level          Level
-	Format         OutputFormat
-	StackTraceFrom Level
+	Formatter      LoggerFormatter
+	StackTraceFrom *Level
 }
+
+func StackFrom(level Level) *Level {
+	return &level
+}
+
+type RedactFunc func(key string, value any) (newValue any, keep bool)
 
 type contextKeyType struct{}
 
@@ -73,84 +71,82 @@ var stateKey = &contextKeyType{}
 type state struct {
 	config      Config
 	fields      map[string]any
-	hidden      map[string]bool
 	scope       string
-	console     io.Writer
-	writers     []io.Writer
+	console     *sink
+	writers     []*sink
 	suppressAll bool
+	redact      RedactFunc
 }
 
-var defaultState atomic.Pointer[state]
-
-func init() {
-	defaultState.Store(&state{
-		config: Config{
-			Level:          LevelInfo,
-			Format:         HumanReadable,
-			StackTraceFrom: LevelError,
-		},
-		console: os.Stderr,
-	})
+var defaultState = &state{
+	config: Config{
+		Level:          LevelInfo,
+		StackTraceFrom: StackFrom(LevelError),
+	},
+	console: &sink{w: os.Stderr},
 }
 
-func SetDefaultFormat(format OutputFormat) {
-	for {
-		var current = defaultState.Load()
-		var next = current.clone()
-		next.config.Format = format
-		if defaultState.CompareAndSwap(current, next) {
-			return
-		}
+type formatterBox struct{ formatter LoggerFormatter }
+
+var defaultFormatter atomic.Value
+
+func SetDefaultFormat(formatter LoggerFormatter) {
+	defaultFormatter.Store(formatterBox{formatter})
+}
+
+func loadDefaultFormatter() LoggerFormatter {
+	if b, ok := defaultFormatter.Load().(formatterBox); ok && b.formatter != nil {
+		return b.formatter
 	}
+	return HumanLogFormatter{}
+}
+
+func (s *state) formatter() LoggerFormatter {
+	if s.config.Formatter != nil {
+		return s.config.Formatter
+	}
+	return loadDefaultFormatter()
 }
 
 func getState(ctx context.Context) *state {
 	if ctx == nil {
-		return defaultState.Load()
+		return defaultState
 	}
 	if s, ok := ctx.Value(stateKey).(*state); ok {
 		return s
 	}
-	return defaultState.Load()
+	return defaultState
 }
 
 func Enabled(ctx context.Context, level Level) bool {
 	var s = getState(ctx)
-	return !s.suppressAll && level >= s.config.Level
+	return !s.suppressAll && (level >= s.config.Level || level == LevelFatal)
 }
 
 func Attach(ctx context.Context, config Config) context.Context {
-	if config.StackTraceFrom == 0 {
-		config.StackTraceFrom = LevelError
+	if config.StackTraceFrom == nil {
+		config.StackTraceFrom = StackFrom(LevelError)
 	}
-	var s = &state{
-		config:  config,
-		console: os.Stderr,
-	}
+	var s = getState(ctx).clone()
+	s.config = config
 	return context.WithValue(ctx, stateKey, s)
-}
-
-type syncer interface {
-	Sync() error
 }
 
 func Flush(ctx context.Context) error {
 	var s = getState(ctx)
-	if f, ok := s.console.(syncer); ok {
-		_ = f.Sync()
+	if s.console != nil {
+		_ = s.console.sync()
 	}
 	for _, w := range s.writers {
-		if f, ok := w.(syncer); ok {
-			if err := f.Sync(); err != nil {
-				return err
-			}
+		if err := w.sync(); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-func SetFormat(ctx context.Context, format OutputFormat) context.Context {
+func SetFormat(ctx context.Context, formatter LoggerFormatter) context.Context {
 	var s = getState(ctx).clone()
-	s.config.Format = format
+	s.config.Formatter = formatter
 	return context.WithValue(ctx, stateKey, s)
 }

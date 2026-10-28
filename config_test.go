@@ -3,7 +3,6 @@ package logs
 import (
 	"context"
 	"errors"
-	"io"
 	"sync"
 	"testing"
 )
@@ -27,48 +26,48 @@ func TestLevel_String_Unknown(t *testing.T) {
 }
 
 func TestSetDefaultFormat_MutatesDefaultState(t *testing.T) {
-	var original = defaultState.Load().config.Format
+	var original = defaultState.formatter()
 	defer SetDefaultFormat(original)
 
-	SetDefaultFormat(JSON)
-	if defaultState.Load().config.Format != JSON {
-		t.Errorf("expected default format JSON, got %v", defaultState.Load().config.Format)
+	SetDefaultFormat(GCPLogFormatter{})
+	if _, ok := defaultState.formatter().(GCPLogFormatter); !ok {
+		t.Errorf("expected default formatter GCPLogFormatter, got %T", defaultState.formatter())
 	}
 }
 
 func TestSetFormat_ReturnsContextWithNewFormat(t *testing.T) {
-	var ctx = Attach(context.Background(), Config{Level: LevelInfo, Format: HumanReadable})
-	var child = SetFormat(ctx, JSON)
+	var ctx = Attach(context.Background(), Config{Level: LevelInfo, Formatter: HumanLogFormatter{}})
+	var child = SetFormat(ctx, GCPLogFormatter{})
 
-	if testState(child).config.Format != JSON {
-		t.Errorf("expected child format JSON, got %v", testState(child).config.Format)
+	if _, ok := testState(child).config.Formatter.(GCPLogFormatter); !ok {
+		t.Errorf("expected child formatter GCPLogFormatter, got %T", testState(child).config.Formatter)
 	}
 }
 
 func TestSetFormat_DoesNotMutateParent(t *testing.T) {
-	var ctx = Attach(context.Background(), Config{Level: LevelInfo, Format: HumanReadable})
-	SetFormat(ctx, JSON)
+	var ctx = Attach(context.Background(), Config{Level: LevelInfo, Formatter: HumanLogFormatter{}})
+	SetFormat(ctx, GCPLogFormatter{})
 
-	if testState(ctx).config.Format != HumanReadable {
-		t.Errorf("SetFormat mutated parent state: parent format is now %v", testState(ctx).config.Format)
+	if _, ok := testState(ctx).config.Formatter.(HumanLogFormatter); !ok {
+		t.Errorf("SetFormat mutated parent state: parent formatter is now %T", testState(ctx).config.Formatter)
 	}
 }
 
 func TestSetFormat_DoesNotMutateDefaultState(t *testing.T) {
-	var original = defaultState.Load().config.Format
-	defer func() { SetDefaultFormat(original) }()
+	var original = defaultState.formatter()
+	defer SetDefaultFormat(original)
 
-	SetFormat(context.Background(), JSON)
+	SetFormat(context.Background(), GCPLogFormatter{})
 
-	if defaultState.Load().config.Format != original {
-		t.Errorf("SetFormat on bare context mutated global default state to %v", defaultState.Load().config.Format)
+	if defaultState.formatter() != original {
+		t.Errorf("SetFormat on bare context mutated global default formatter to %v", defaultState.formatter())
 	}
 }
 
 func TestFlush_SyncsConsoleAndWriters(t *testing.T) {
 	var console = &fakeSyncer{}
 	var writer = &fakeSyncer{}
-	var s = &state{console: console, writers: []io.Writer{writer}}
+	var s = &state{console: &sink{w: console}, writers: []*sink{{w: writer}}}
 	var ctx = context.WithValue(context.Background(), stateKey, s)
 
 	if err := Flush(ctx); err != nil {
@@ -84,7 +83,7 @@ func TestFlush_SyncsConsoleAndWriters(t *testing.T) {
 
 func TestFlush_IgnoresConsoleSyncError(t *testing.T) {
 	var console = &fakeSyncer{syncErr: errors.New("sync /dev/stderr: operation not supported by device")}
-	var s = &state{console: console}
+	var s = &state{console: &sink{w: console}}
 	var ctx = context.WithValue(context.Background(), stateKey, s)
 
 	if err := Flush(ctx); err != nil {
@@ -98,8 +97,8 @@ func TestFlush_IgnoresConsoleSyncError(t *testing.T) {
 func TestFlush_ReturnsWriterSyncError(t *testing.T) {
 	var wantErr = errors.New("writer sync failed")
 	var s = &state{
-		console: &fakeSyncer{},
-		writers: []io.Writer{&fakeSyncer{syncErr: wantErr}},
+		console: &sink{w: &fakeSyncer{}},
+		writers: []*sink{{w: &fakeSyncer{syncErr: wantErr}}},
 	}
 	var ctx = context.WithValue(context.Background(), stateKey, s)
 
@@ -157,8 +156,15 @@ func TestEnabled_IsFalseWhenAllOutputIsSuppressed(t *testing.T) {
 	}
 }
 
+func TestEnabled_FatalBypassesLevelFilter(t *testing.T) {
+	var ctx = Attach(context.Background(), Config{Level: LevelFatal + 1})
+	if !Enabled(ctx, LevelFatal) || Enabled(ctx, LevelError) {
+		t.Fatal("only fatal should bypass a level above fatal")
+	}
+}
+
 func TestSetDefaultFormat_IsSafeBesideConcurrentLogging(t *testing.T) {
-	var original = defaultState.Load().config.Format
+	var original = defaultState.formatter()
 	defer SetDefaultFormat(original)
 
 	var ctx = SuppressConsoleOutput(context.Background())
@@ -167,8 +173,8 @@ func TestSetDefaultFormat_IsSafeBesideConcurrentLogging(t *testing.T) {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			SetDefaultFormat(JSON)
-			SetDefaultFormat(HumanReadable)
+			SetDefaultFormat(GCPLogFormatter{})
+			SetDefaultFormat(HumanLogFormatter{})
 		}()
 		go func() {
 			defer wg.Done()
@@ -180,12 +186,12 @@ func TestSetDefaultFormat_IsSafeBesideConcurrentLogging(t *testing.T) {
 }
 
 func TestSetDefaultFormat_LeavesAttachedContextsAlone(t *testing.T) {
-	var original = defaultState.Load().config.Format
+	var original = defaultState.formatter()
 	defer SetDefaultFormat(original)
 
-	var ctx = SetFormat(context.Background(), HumanReadable)
-	SetDefaultFormat(JSON)
-	if getState(ctx).config.Format != HumanReadable {
+	var ctx = SetFormat(context.Background(), HumanLogFormatter{})
+	SetDefaultFormat(GCPLogFormatter{})
+	if getState(ctx).formatter() != (HumanLogFormatter{}) {
 		t.Error("expected a context's own format to survive a new default")
 	}
 }

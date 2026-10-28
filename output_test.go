@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
 
 func TestFormatHuman_BasicMessage(t *testing.T) {
-	var e = entry{
+	var e = Entry{
 		Timestamp: time.Date(2025, 1, 15, 14, 30, 45, 0, time.UTC),
 		Level:     LevelInfo,
 		Message:   "hello world",
@@ -28,7 +29,7 @@ func TestFormatHuman_BasicMessage(t *testing.T) {
 }
 
 func TestFormatHuman_WithFields(t *testing.T) {
-	var e = entry{
+	var e = Entry{
 		Timestamp: time.Date(2025, 1, 15, 14, 30, 45, 0, time.UTC),
 		Level:     LevelInfo,
 		Message:   "msg",
@@ -44,7 +45,7 @@ func TestFormatHuman_WithFields(t *testing.T) {
 }
 
 func TestFormatHuman_FieldsSortedAlphabetically(t *testing.T) {
-	var e = entry{
+	var e = Entry{
 		Timestamp: time.Date(2025, 1, 15, 14, 30, 45, 0, time.UTC),
 		Level:     LevelInfo,
 		Message:   "msg",
@@ -70,7 +71,7 @@ func TestFormatHuman_ColorByLevel(t *testing.T) {
 		{LevelDebug, colorGray},
 	}
 	for _, tt := range tests {
-		var e = entry{Timestamp: time.Now(), Level: tt.level, Message: "test"}
+		var e = Entry{Timestamp: time.Now(), Level: tt.level, Message: "test"}
 		var result = formatHuman(e)
 		if !strings.Contains(result, tt.color) {
 			t.Errorf("level %s: expected color %q in output", tt.level, tt.color)
@@ -78,57 +79,12 @@ func TestFormatHuman_ColorByLevel(t *testing.T) {
 	}
 }
 
-func TestFormatHuman_HiddenFieldsFiltered(t *testing.T) {
-	var e = entry{
-		Timestamp: time.Now(),
-		Level:     LevelInfo,
-		Message:   "msg",
-		Fields:    map[string]any{"app": "test", "env": "prod", "real_field": "keep"},
-		Hidden:    map[string]bool{"app": true},
-	}
-	var result = formatHuman(e)
-	if strings.Contains(result, "app=") {
-		t.Errorf("expected hidden field 'app' to be filtered, got: %s", result)
-	}
-	if !strings.Contains(result, "env=") || !strings.Contains(result, "real_field=") {
-		t.Errorf("expected unhidden fields to be kept, got: %s", result)
-	}
-}
-
-func TestFormatHuman_NoFieldIsHiddenByDefault(t *testing.T) {
-	var e = entry{
-		Timestamp: time.Now(),
-		Level:     LevelInfo,
-		Message:   "msg",
-		Fields:    map[string]any{"app": "test", "user_id": "u1", "http_path": "/x"},
-	}
-	var result = formatHuman(e)
-	for _, field := range []string{"app=", "user_id=", "http_path="} {
-		if !strings.Contains(result, field) {
-			t.Errorf("expected %s to be shown by default, got: %s", field, result)
-		}
-	}
-}
-
-func TestFormatJSON_KeepsHiddenFields(t *testing.T) {
-	var e = entry{
-		Timestamp: time.Now(),
-		Level:     LevelInfo,
-		Message:   "msg",
-		Fields:    map[string]any{"app": "test"},
-		Hidden:    map[string]bool{"app": true},
-	}
-	if result := formatJSON(e); !strings.Contains(result, `"app":"test"`) {
-		t.Errorf("expected JSON to keep a field hidden from human output, got: %s", result)
-	}
-}
-
 func TestFormatHuman_CallerInfo(t *testing.T) {
-	var e = entry{
+	var e = Entry{
 		Timestamp: time.Now(),
 		Level:     LevelInfo,
 		Message:   "msg",
-		Caller:    callerInfo{File: "engine/canvas.go", Line: 42, Pkg: "engine"},
+		Caller:    CallerInfo{File: "engine/canvas.go", Line: 42, Pkg: "engine"},
 	}
 	var result = formatHuman(e)
 	if !strings.Contains(result, "engine/canvas.go:42") {
@@ -137,7 +93,7 @@ func TestFormatHuman_CallerInfo(t *testing.T) {
 }
 
 func TestFormatHuman_StringFieldsQuoted(t *testing.T) {
-	var e = entry{
+	var e = Entry{
 		Timestamp: time.Now(),
 		Level:     LevelInfo,
 		Message:   "msg",
@@ -150,12 +106,12 @@ func TestFormatHuman_StringFieldsQuoted(t *testing.T) {
 }
 
 func TestFormatJSON_ValidJSON(t *testing.T) {
-	var e = entry{
+	var e = Entry{
 		Timestamp: time.Date(2025, 1, 15, 14, 30, 45, 0, time.UTC),
 		Level:     LevelInfo,
 		Message:   "hello world",
 		Fields:    map[string]any{"batch": "abc"},
-		Caller:    callerInfo{File: "engine/canvas.go", Line: 42, Pkg: "engine"},
+		Caller:    CallerInfo{File: "engine/canvas.go", Line: 42, Pkg: "engine"},
 	}
 	var result = formatJSON(e)
 
@@ -176,7 +132,7 @@ func TestFormatJSON_ValidJSON(t *testing.T) {
 }
 
 func TestFormatJSON_DataFieldContainsFields(t *testing.T) {
-	var e = entry{
+	var e = Entry{
 		Timestamp: time.Now(),
 		Level:     LevelInfo,
 		Message:   "msg",
@@ -199,12 +155,12 @@ func TestFormatJSON_DataFieldContainsFields(t *testing.T) {
 	}
 }
 
-func TestFormatJSON_AtCodeInData(t *testing.T) {
-	var e = entry{
+func TestFormatJSON_SourceLocation(t *testing.T) {
+	var e = Entry{
 		Timestamp: time.Now(),
 		Level:     LevelError,
 		Message:   "boom",
-		Caller:    callerInfo{File: "engine/canvas.go", Line: 42, Pkg: "engine", Func: "engine.MyFunc"},
+		Caller:    CallerInfo{File: "engine/canvas.go", Line: 42, Pkg: "engine", Func: "engine.MyFunc"},
 	}
 	var result = formatJSON(e)
 
@@ -212,32 +168,31 @@ func TestFormatJSON_AtCodeInData(t *testing.T) {
 	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
-	data, ok := parsed["data"].(map[string]any)
+	loc, ok := parsed["logging.googleapis.com/sourceLocation"].(map[string]any)
 	if !ok {
-		t.Fatalf("expected jsonPayload.data to be an object, got %T (%v)", parsed["data"], parsed["data"])
+		t.Fatalf("expected GCP sourceLocation object, got %T (%v)", parsed["logging.googleapis.com/sourceLocation"], parsed["logging.googleapis.com/sourceLocation"])
 	}
-	code, ok := data["@code"].(string)
-	if !ok {
-		t.Fatalf("expected jsonPayload.data.@code to be a string, got %T", data["@code"])
+	if loc["file"] != "engine/canvas.go" {
+		t.Errorf("expected sourceLocation.file, got %v", loc["file"])
 	}
-	if !strings.Contains(code, "engine/canvas.go:42") {
-		t.Errorf("expected @code to contain file:line, got %q", code)
+	if loc["line"] != "42" {
+		t.Errorf("expected sourceLocation.line as the string %q (GCP encodes int64 line as a string), got %v", "42", loc["line"])
 	}
-	if !strings.Contains(code, "MyFunc") {
-		t.Errorf("expected @code to contain function name, got %q", code)
+	if loc["function"] != "engine.MyFunc" {
+		t.Errorf("expected sourceLocation.function, got %v", loc["function"])
 	}
-	if _, exists := parsed["caller"]; exists {
-		t.Errorf("expected no top-level caller field, got %v", parsed["caller"])
+	if _, exists := parsed["data"]; exists {
+		t.Errorf("caller location must not leak into data, got data=%v", parsed["data"])
 	}
 }
 
-func TestFormatJSON_AtCodeCoexistsWithUserFields(t *testing.T) {
-	var e = entry{
+func TestFormatJSON_SourceLocationLeavesDataToUserFields(t *testing.T) {
+	var e = Entry{
 		Timestamp: time.Now(),
 		Level:     LevelError,
 		Message:   "boom",
-		Fields:    map[string]any{"batch": "abc"},
-		Caller:    callerInfo{File: "engine/canvas.go", Line: 42, Pkg: "engine", Func: "engine.MyFunc"},
+		Fields:    map[string]any{"batch": "abc", "@code": "user-owned"},
+		Caller:    CallerInfo{File: "engine/canvas.go", Line: 42, Pkg: "engine", Func: "engine.MyFunc"},
 	}
 	var result = formatJSON(e)
 
@@ -249,16 +204,16 @@ func TestFormatJSON_AtCodeCoexistsWithUserFields(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected jsonPayload.data to be an object, got %T", parsed["data"])
 	}
-	if _, ok := data["@code"].(string); !ok {
-		t.Errorf("expected @code alongside user fields, got %v", data)
-	}
 	if data["batch"] != "abc" {
 		t.Errorf("expected user field batch=abc preserved, got %v", data["batch"])
+	}
+	if data["@code"] != "user-owned" {
+		t.Errorf("a user field named @code is no longer stomped by caller info, got %v", data["@code"])
 	}
 }
 
 func TestFormatJSON_NoDataFieldWhenNoFieldsAndNoCaller(t *testing.T) {
-	var e = entry{
+	var e = Entry{
 		Timestamp: time.Now(),
 		Level:     LevelInfo,
 		Message:   "msg",
@@ -275,7 +230,7 @@ func TestFormatJSON_NoDataFieldWhenNoFieldsAndNoCaller(t *testing.T) {
 }
 
 func TestFormatJSON_StackTraceIncluded(t *testing.T) {
-	var e = entry{
+	var e = Entry{
 		Timestamp: time.Now(),
 		Level:     LevelError,
 		Message:   "msg",
@@ -368,7 +323,7 @@ func TestFormatFieldValue_DefaultUsesGoSyntax(t *testing.T) {
 }
 
 func TestFormatHuman_IncludesStackAndError(t *testing.T) {
-	var e = entry{
+	var e = Entry{
 		Timestamp: time.Now(),
 		Level:     LevelError,
 		Message:   "boom",
@@ -384,16 +339,31 @@ func TestFormatHuman_IncludesStackAndError(t *testing.T) {
 	}
 }
 
-func TestFormatJSON_MarshalFailureReturnsErrorEntry(t *testing.T) {
-	var e = entry{
+func TestFormatJSON_UnserializableFieldKeepsEntry(t *testing.T) {
+	var e = Entry{
 		Timestamp: time.Now(),
 		Level:     LevelInfo,
 		Message:   "unmarshalable",
-		Fields:    map[string]any{"fn": func() {}},
+		Fields:    map[string]any{"fn": func() {}, "ok": "kept"},
 	}
 	var result = formatJSON(e)
-	if !strings.Contains(result, "failed to marshal log entry") {
-		t.Errorf("expected marshal-failure fallback, got: %s", result)
+
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+		t.Fatalf("entry must stay valid JSON, got: %s", result)
+	}
+	if parsed["message"] != "unmarshalable" {
+		t.Errorf("message must survive a bad field, got %v", parsed["message"])
+	}
+	data, ok := parsed["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected data object, got %T", parsed["data"])
+	}
+	if data["ok"] != "kept" {
+		t.Errorf("good field must survive, got %v", data["ok"])
+	}
+	if fn, _ := data["fn"].(string); !strings.Contains(fn, "ERR") {
+		t.Errorf("unserializable field should become a placeholder, got %v", data["fn"])
 	}
 }
 
@@ -478,7 +448,7 @@ func TestGetRunningDirPrefix_GetwdErrorFallsBackToDot(t *testing.T) {
 }
 
 func TestFormatJSON_ErrorField(t *testing.T) {
-	var e = entry{
+	var e = Entry{
 		Timestamp: time.Now(),
 		Level:     LevelError,
 		Message:   "operation failed",
@@ -513,4 +483,26 @@ func TestTrimDirPrefix_PathComponentAware(t *testing.T) {
 			t.Errorf("%s: trimDirPrefix(%q, %q) = %q, want %q", tt.name, tt.file, tt.prefix, got, tt.want)
 		}
 	}
+}
+
+func TestGetRunningDirPrefix_ConcurrentLazyInitRace(t *testing.T) {
+	var originalGetwd = getwd
+	var originalPrefix = runningDirPrefix
+	defer func() {
+		getwd = originalGetwd
+		runningDirPrefix = originalPrefix
+	}()
+
+	getwd = func() (string, error) { return "/repo/apps/myservice", nil }
+	runningDirPrefix = ""
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = getRunningDirPrefix()
+		}()
+	}
+	wg.Wait()
 }

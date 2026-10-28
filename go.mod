@@ -1,3 +1,3 @@
 module github.com/gleno/logs
 
-go 1.27.3
+go 1.26.2
